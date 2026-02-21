@@ -7,8 +7,14 @@ import (
 )
 
 func (s *parserState) collectMiddlewareSemantics(pkg string, middlewareNames []string) ([]model.Parameter, map[string]ast.Expr) {
+	params, ctx, _ := s.collectMiddlewareSemanticsWithAuth(pkg, nil, middlewareNames)
+	return params, ctx
+}
+
+func (s *parserState) collectMiddlewareSemanticsWithAuth(pkg string, file *fileCtx, middlewareNames []string) ([]model.Parameter, map[string]ast.Expr, []string) {
 	params := map[string]model.Parameter{}
 	contextTypes := map[string]ast.Expr{}
+	authSchemes := []string{}
 	seen := map[string]bool{}
 
 	for _, name := range middlewareNames {
@@ -16,12 +22,16 @@ func (s *parserState) collectMiddlewareSemantics(pkg string, middlewareNames []s
 			continue
 		}
 		seen[name] = true
-		if looksLikeAuthName(name) {
-			// Auth middleware should map to `security`, not operation parameters.
+		fm := s.resolveFuncInScope(file, pkg, name)
+		if fm == nil || fm.decl == nil || fm.decl.Body == nil {
+			if looksLikeAuthName(name) {
+				authSchemes = append(authSchemes, inferAuthSchemesFromNames([]string{name})...)
+			}
 			continue
 		}
-		fm := s.funcsByPkg[pkg][name]
-		if fm == nil || fm.decl == nil || fm.decl.Body == nil {
+		if looksLikeAuthName(name) {
+			authSchemes = append(authSchemes, inferAuthSchemesFromMiddlewareBody(fm)...)
+			// Auth middleware should map to `security`, not operation parameters.
 			continue
 		}
 
@@ -47,7 +57,7 @@ func (s *parserState) collectMiddlewareSemantics(pkg string, middlewareNames []s
 	for _, p := range params {
 		outParams = append(outParams, p)
 	}
-	return outParams, contextTypes
+	return outParams, contextTypes, dedupeStrings(authSchemes)
 }
 
 func middlewareInnerBody(body *ast.BlockStmt) *ast.BlockStmt {

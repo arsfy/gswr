@@ -31,11 +31,11 @@ func parseRouteDoc(doc *ast.CommentGroup) routeDoc {
 			continue
 		}
 		lower := strings.ToLower(line)
-		if v, ok := strings.CutPrefix(line, "@summary "); ok {
+		if v, ok := cutAnnotationValue(line, "summary"); ok {
 			summary = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@description "); ok {
+		if v, ok := cutAnnotationValue(line, "description"); ok {
 			descLines = append(descLines, strings.TrimSpace(v))
 			continue
 		}
@@ -46,6 +46,10 @@ func parseRouteDoc(doc *ast.CommentGroup) routeDoc {
 					tagSet[item] = true
 				}
 			}
+			continue
+		}
+		if strings.HasPrefix(line, "@") {
+			// Skip unhandled swagger directives to avoid polluting description.
 			continue
 		}
 		if summary == "" {
@@ -139,39 +143,65 @@ func parseMainDocInfo(doc *ast.CommentGroup) mainDocInfo {
 		return mainDocInfo{}
 	}
 	info := mainDocInfo{}
+	inSecurityDef := false
 	for _, raw := range strings.Split(doc.Text(), "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@title "); ok {
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "@securitydefinitions.") {
+			inSecurityDef = true
+			continue
+		}
+		if inSecurityDef && strings.HasPrefix(line, "@") {
+			if !(strings.HasPrefix(lower, "@in ") || strings.HasPrefix(lower, "@name ") || strings.HasPrefix(lower, "@description ")) {
+				inSecurityDef = false
+			}
+		}
+		if v, ok := cutAnnotationValue(line, "title"); ok {
 			info.title = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@version "); ok {
+		if v, ok := cutAnnotationValue(line, "version"); ok {
 			info.version = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@description "); ok {
+		if v, ok := cutAnnotationValue(line, "description"); ok {
+			if inSecurityDef {
+				continue
+			}
 			info.description = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@BasePath "); ok {
+		if v, ok := cutAnnotationValue(line, "basepath"); ok {
 			info.basePath = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@basepath "); ok {
-			info.basePath = strings.TrimSpace(v)
-			continue
-		}
-		if v, ok := strings.CutPrefix(line, "@host "); ok {
+		if v, ok := cutAnnotationValue(line, "host"); ok {
 			info.host = strings.TrimSpace(v)
 			continue
 		}
-		if v, ok := strings.CutPrefix(line, "@schemes "); ok {
+		if v, ok := cutAnnotationValue(line, "schemes"); ok {
 			info.schemes = splitTags(strings.ReplaceAll(v, " ", ","))
 			continue
 		}
+		if strings.HasPrefix(line, "@") {
+			// Keep current block state for security definition metadata lines.
+			continue
+		}
+		if !strings.HasPrefix(line, "@") {
+			inSecurityDef = false
+		}
 	}
 	return info
+}
+
+func cutAnnotationValue(line, key string) (string, bool) {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	prefix := "@" + strings.ToLower(key) + " "
+	if !strings.HasPrefix(lower, prefix) {
+		return "", false
+	}
+	return strings.TrimSpace(line[len(prefix):]), true
 }

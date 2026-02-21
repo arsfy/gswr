@@ -562,8 +562,8 @@ func (s *parserState) resolveStructType(pkg string, file *fileCtx, typeExpr ast.
 	case *ast.StructType:
 		return pkg, file, t
 	case *ast.Ident:
-		meta := s.namedTypesByPkg[pkg][t.Name]
-		if meta == nil {
+		meta, ok := s.resolveNamedTypeInScope(pkg, file, t.Name)
+		if !ok || meta == nil {
 			return "", nil, nil
 		}
 		st, ok := meta.typeExpr.(*ast.StructType)

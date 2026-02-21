@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -19,7 +20,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 	if err != nil {
 		return nil, err
 	}
-	root := filepath.Dir(entryAbs)
+	root := findParseRoot(entryAbs)
 	fset := token.NewFileSet()
 
 	state := &parserState{
@@ -32,12 +33,17 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		apiHost:              "",
 		filesByPkg:           map[string][]*fileCtx{},
 		funcsByPkg:           map[string]map[string]*funcMeta{},
+		funcsByImportPath:    map[string]map[string]*funcMeta{},
 		namedTypesByPkg:      map[string]map[string]*namedTypeMeta{},
+		namedTypesByImport:   map[string]map[string]*namedTypeMeta{},
 		components:           map[string]*model.Schema{},
 		tagDescriptions:      map[string]string{},
 		visitingKey:          map[string]bool{},
+		routeSetupHints:      map[string]bool{},
 		buildingComponentRef: map[string]bool{},
 	}
+	modulePath := readModulePath(root)
+	var entryMain *funcMeta
 
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -60,18 +66,35 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 			return err
 		}
 		collectTagDefinitions(f, state.tagDescriptions)
-		ctx := &fileCtx{path: path, pkg: f.Name.Name, astFile: f, imports: parseImports(f)}
+		ctx := &fileCtx{
+			path:       path,
+			pkg:        f.Name.Name,
+			importPath: importPathForFile(root, modulePath, path),
+			astFile:    f,
+			imports:    parseImports(f),
+		}
 		state.filesByPkg[ctx.pkg] = append(state.filesByPkg[ctx.pkg], ctx)
 		if state.funcsByPkg[ctx.pkg] == nil {
 			state.funcsByPkg[ctx.pkg] = map[string]*funcMeta{}
 		}
+		if state.funcsByImportPath[ctx.importPath] == nil {
+			state.funcsByImportPath[ctx.importPath] = map[string]*funcMeta{}
+		}
 		if state.namedTypesByPkg[ctx.pkg] == nil {
 			state.namedTypesByPkg[ctx.pkg] = map[string]*namedTypeMeta{}
 		}
+		if state.namedTypesByImport[ctx.importPath] == nil {
+			state.namedTypesByImport[ctx.importPath] = map[string]*namedTypeMeta{}
+		}
 		for _, decl := range f.Decls {
 			if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil {
-				state.funcsByPkg[ctx.pkg][fd.Name.Name] = &funcMeta{pkg: ctx.pkg, name: fd.Name.Name, decl: fd, file: ctx}
-				if ctx.pkg == "main" && fd.Name.Name == "main" {
+				meta := &funcMeta{pkg: ctx.pkg, name: fd.Name.Name, decl: fd, file: ctx}
+				state.funcsByPkg[ctx.pkg][fd.Name.Name] = meta
+				state.funcsByImportPath[ctx.importPath][fd.Name.Name] = meta
+				if path == entryAbs && ctx.pkg == "main" && fd.Name.Name == "main" {
+					entryMain = meta
+				}
+				if ctx.pkg == "main" && fd.Name.Name == "main" && path == entryAbs {
 					info := parseMainDocInfo(fd.Doc)
 					if info.title != "" {
 						state.apiTitle = info.title
@@ -103,6 +126,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 					continue
 				}
 				state.namedTypesByPkg[ctx.pkg][ts.Name.Name] = &namedTypeMeta{pkg: ctx.pkg, name: ts.Name.Name, typeExpr: ts.Type, file: ctx}
+				state.namedTypesByImport[ctx.importPath][ts.Name.Name] = &namedTypeMeta{pkg: ctx.pkg, name: ts.Name.Name, typeExpr: ts.Type, file: ctx}
 			}
 		}
 		return nil
@@ -111,7 +135,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		return nil, err
 	}
 
-	mainFunc := state.funcsByPkg["main"]["main"]
+	mainFunc := entryMain
 	if mainFunc == nil {
 		return nil, fmt.Errorf("main.main not found from entry root: %s", root)
 	}
@@ -149,6 +173,50 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		Routes:      state.routes,
 		Components:  state.components,
 	}, nil
+}
+
+func findParseRoot(entryAbs string) string {
+	dir := filepath.Dir(entryAbs)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Dir(entryAbs)
+		}
+		dir = parent
+	}
+}
+
+func readModulePath(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if v, ok := strings.CutPrefix(line, "module "); ok {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func importPathForFile(root, modulePath, filePath string) string {
+	if modulePath == "" {
+		return ""
+	}
+	dir := filepath.Dir(filePath)
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return modulePath
+	}
+	rel = filepath.ToSlash(rel)
+	if rel == "." {
+		return modulePath
+	}
+	return modulePath + "/" + rel
 }
 
 func parseImports(f *ast.File) map[string]string {

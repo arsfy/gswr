@@ -7,6 +7,7 @@ type Route struct {
 	Summary      string
 	Description  string
 	AuthRequired bool
+	AuthSchemes  []string
 	Tags         []string
 	Middlewares  []string
 	Parameters   []Parameter

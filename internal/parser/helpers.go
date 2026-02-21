@@ -156,11 +156,18 @@ func lowerFirst(s string) string {
 }
 
 func isEchoGroupType(t ast.Expr) bool {
-	star, ok := t.(*ast.StarExpr)
-	if !ok {
-		return false
+	return isEchoNamedType(t, "Group")
+}
+
+func isEchoRouterType(t ast.Expr) bool {
+	return isEchoNamedType(t, "Group") || isEchoNamedType(t, "Echo")
+}
+
+func isEchoNamedType(t ast.Expr, name string) bool {
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
 	}
-	sel, ok := star.X.(*ast.SelectorExpr)
+	sel, ok := t.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
@@ -168,7 +175,7 @@ func isEchoGroupType(t ast.Expr) bool {
 	if !ok {
 		return false
 	}
-	return id.Name == "echo" && sel.Sel.Name == "Group"
+	return id.Name == "echo" && sel.Sel.Name == name
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {
@@ -196,15 +203,30 @@ func intLiteral(expr ast.Expr) (int, bool) {
 }
 
 func joinPath(prefix, suffix string) string {
+	normalize := func(p string) string {
+		if p == "" {
+			return "/"
+		}
+		if p != "/" {
+			p = strings.TrimRight(p, "/")
+			if p == "" {
+				p = "/"
+			}
+		}
+		return p
+	}
 	if prefix == "" {
 		if strings.HasPrefix(suffix, "/") {
-			return suffix
+			return normalize(suffix)
 		}
-		return "/" + suffix
+		return normalize("/" + suffix)
 	}
 	left := strings.TrimRight(prefix, "/")
 	right := strings.TrimLeft(suffix, "/")
-	return left + "/" + right
+	if right == "" {
+		return normalize(left)
+	}
+	return normalize(left + "/" + right)
 }
 
 func cloneGroupStateMap(in map[string]groupState) map[string]groupState {
@@ -212,6 +234,9 @@ func cloneGroupStateMap(in map[string]groupState) map[string]groupState {
 	for k, v := range in {
 		if len(v.middlewares) > 0 {
 			v.middlewares = append([]string(nil), v.middlewares...)
+		}
+		if len(v.authSchemes) > 0 {
+			v.authSchemes = append([]string(nil), v.authSchemes...)
 		}
 		out[k] = v
 	}
@@ -236,9 +261,13 @@ func resolveGroupState(expr ast.Expr, env map[string]groupState) (groupState, bo
 		if !ok {
 			return groupState{}, false
 		}
+		groupMiddlewares := middlewareNamesFromArgs(n.Args[1:])
+		groupAuthSchemes := inferAuthSchemesFromNames(groupMiddlewares)
 		return groupState{
 			prefix:       joinPath(base.prefix, p),
-			authRequired: base.authRequired,
+			authRequired: base.authRequired || hasAuthMiddleware(n.Args[1:]),
+			authSchemes:  mergeMiddlewareNames(base.authSchemes, groupAuthSchemes),
+			middlewares:  mergeMiddlewareNames(base.middlewares, groupMiddlewares),
 		}, true
 	default:
 		return groupState{}, false

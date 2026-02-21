@@ -35,3 +35,46 @@ func TestOpenAPIGenerationGolden(t *testing.T) {
 		t.Fatalf("golden mismatch: %s\nregenerate with: GOCACHE=/tmp/go-build-cache go run ./cmd/openapi-gen --entry tests/example-echo/main.go --out docs/openapi.yaml && cp docs/openapi.yaml internal/integration/testdata/openapi.golden.yaml", wantPath)
 	}
 }
+
+func TestParseEchoV4NestedRouteBootstrap(t *testing.T) {
+	entry := filepath.Join("..", "..", "tests", "example-echo-v4", "cmd", "main.go")
+	ir, err := parser.ParseEchoProject(entry)
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	var found bool
+	for _, r := range ir.Routes {
+		if r.Method == "GET" && r.Path == "/api/v1/user/{id}" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected route GET /api/v1/user/{id}, got routes: %#v", ir.Routes)
+	}
+}
+
+func TestParseDuplicatePackageNames(t *testing.T) {
+	entry := filepath.Join("..", "..", "tests", "example-dup-pkg", "main.go")
+	ir, err := parser.ParseEchoProject(entry)
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	want := map[string]bool{
+		"GET /api/general/order/list": false,
+		"GET /api/admin/order/list":   false,
+	}
+	for _, r := range ir.Routes {
+		key := r.Method + " " + r.Path
+		if _, ok := want[key]; ok {
+			want[key] = true
+		}
+	}
+	for k, ok := range want {
+		if !ok {
+			t.Fatalf("expected route %s, got routes: %#v", k, ir.Routes)
+		}
+	}
+}

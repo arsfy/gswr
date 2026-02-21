@@ -41,8 +41,8 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 				return s.schemaFromTypeExpr(pkg, file, t)
 			}
 		}
-		if s.namedTypesByPkg[pkg][n.Name] != nil {
-			return s.schemaFromNamedType(pkg, n.Name)
+		if meta, ok := s.resolveNamedTypeInScope(pkg, file, n.Name); ok {
+			return s.schemaFromNamedMeta(meta)
 		}
 		return &model.Schema{Type: "object"}
 	case *ast.SelectorExpr:
@@ -71,7 +71,7 @@ func (s *parserState) resolveExprTypeWithVars(pkg string, file *fileCtx, expr as
 				return pkg, file, t, true
 			}
 		}
-		if meta := s.namedTypesByPkg[pkg][n.Name]; meta != nil {
+		if meta, ok := s.resolveNamedTypeInScope(pkg, file, n.Name); ok {
 			return meta.pkg, meta.file, meta.typeExpr, true
 		}
 		return "", nil, nil, false
@@ -292,7 +292,14 @@ func (s *parserState) schemaFromNamedType(pkg, typeName string) *model.Schema {
 	if meta == nil {
 		return &model.Schema{Type: "object"}
 	}
-	comp := componentName(pkg, typeName)
+	return s.schemaFromNamedMeta(meta)
+}
+
+func (s *parserState) schemaFromNamedMeta(meta *namedTypeMeta) *model.Schema {
+	if meta == nil {
+		return &model.Schema{Type: "object"}
+	}
+	comp := componentName(meta.pkg, meta.name)
 	if _, ok := s.components[comp]; ok {
 		return &model.Schema{Ref: "#/components/schemas/" + comp}
 	}
@@ -339,8 +346,11 @@ func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) 
 		case "any", "interface{}":
 			return &model.Schema{Type: "object"}
 		default:
-			if s.namedTypesByPkg[pkg][n.Name] != nil {
-				return s.schemaFromNamedType(pkg, n.Name)
+			if meta, ok := s.resolveNamedTypeInScope(pkg, file, n.Name); ok {
+				return s.schemaFromNamedMeta(meta)
+			}
+			if meta, ok := s.resolveNamedTypeAnyPkg(n.Name); ok {
+				return s.schemaFromNamedMeta(meta)
 			}
 			return &model.Schema{Type: "object"}
 		}
@@ -351,23 +361,74 @@ func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) 
 	case *ast.StructType:
 		return s.schemaFromStruct(pkg, file, n)
 	case *ast.SelectorExpr:
-		if file == nil {
-			return &model.Schema{Type: "object"}
+		if file != nil {
+			if alias, ok := n.X.(*ast.Ident); ok {
+				if importPath := file.imports[alias.Name]; importPath != "" {
+					if byName := s.namedTypesByImport[importPath]; byName != nil {
+						if meta := byName[n.Sel.Name]; meta != nil {
+							return s.schemaFromNamedMeta(meta)
+						}
+					}
+					return s.schemaFromNamedType(filepath.Base(importPath), n.Sel.Name)
+				}
+			}
 		}
-		alias, ok := n.X.(*ast.Ident)
-		if !ok {
-			return &model.Schema{Type: "object"}
+		if meta, ok := s.resolveNamedTypeAnyPkg(n.Sel.Name); ok {
+			return s.schemaFromNamedMeta(meta)
 		}
-		importPath := file.imports[alias.Name]
-		if importPath == "" {
-			return &model.Schema{Type: "object"}
-		}
-		return s.schemaFromNamedType(filepath.Base(importPath), n.Sel.Name)
+		return &model.Schema{Type: "object"}
 	case *ast.StarExpr:
 		return s.schemaFromTypeExpr(pkg, file, n.X)
 	default:
 		return &model.Schema{Type: "object"}
 	}
+}
+
+func (s *parserState) resolveNamedTypeAnyPkg(typeName string) (*namedTypeMeta, bool) {
+	var found *namedTypeMeta
+	for _, byName := range s.namedTypesByPkg {
+		meta := byName[typeName]
+		if meta == nil {
+			continue
+		}
+		if found != nil {
+			fp := ""
+			mp := ""
+			if found.file != nil {
+				fp = found.file.importPath
+			}
+			if meta.file != nil {
+				mp = meta.file.importPath
+			}
+			if fp != mp {
+				return nil, false
+			}
+		}
+		found = meta
+	}
+	if found == nil {
+		return nil, false
+	}
+	return found, true
+}
+
+func (s *parserState) resolveNamedTypeInScope(pkg string, file *fileCtx, typeName string) (*namedTypeMeta, bool) {
+	if file != nil && file.importPath != "" {
+		if byName := s.namedTypesByImport[file.importPath]; byName != nil {
+			if meta := byName[typeName]; meta != nil {
+				return meta, true
+			}
+		}
+	}
+	if meta := s.namedTypesByPkg[pkg][typeName]; meta != nil {
+		if file == nil || meta.file == nil || meta.file.importPath == file.importPath {
+			return meta, true
+		}
+	}
+	if found, ok := s.resolveNamedTypeAnyPkg(typeName); ok {
+		return found, true
+	}
+	return nil, false
 }
 
 func mergeParameters(pathParamNames []string, parsed []model.Parameter) []model.Parameter {

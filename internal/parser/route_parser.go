@@ -95,8 +95,9 @@ func (s *parserState) handleAssign(st *ast.AssignStmt, env map[string]groupState
 	}
 	env[lhs.Name] = groupState{
 		prefix:       joinPath(base.prefix, p),
-		authRequired: base.authRequired,
-		middlewares:  append([]string(nil), base.middlewares...),
+		authRequired: base.authRequired || hasAuthMiddleware(call.Args[1:]),
+		authSchemes:  mergeMiddlewareNames(base.authSchemes, inferAuthSchemesFromNames(middlewareNamesFromArgs(call.Args[1:]))),
+		middlewares:  mergeMiddlewareNames(base.middlewares, middlewareNamesFromArgs(call.Args[1:])),
 	}
 }
 
@@ -111,7 +112,10 @@ func (s *parserState) handleCallExpr(owner *funcMeta, expr ast.Expr, env map[str
 	if s.tryRoute(owner, call, env) {
 		return
 	}
-	s.tryRouterCall(owner, call, env)
+	if s.tryRouterCall(owner, call, env) {
+		return
+	}
+	s.tryBootstrapRouterCall(owner, call)
 }
 
 func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) bool {
@@ -137,7 +141,7 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	echoPath := joinPath(state.prefix, p)
 	openapiPath, pathParamNames := normalizeEchoPath(echoPath)
 	routeMiddlewares := mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(call.Args[2:]))
-	mwParams, mwContextTypes := s.collectMiddlewareSemantics(owner.pkg, routeMiddlewares)
+	mwParams, mwContextTypes, mwAuthSchemes := s.collectMiddlewareSemanticsWithAuth(owner.pkg, owner.file, routeMiddlewares)
 
 	semantics := handlerSemantics{responses: []model.Response{{StatusCode: 200, Description: "OK", Schema: &model.Schema{Type: "object"}}}}
 	handlerName := normalizeOperationID(sel.Sel.Name, openapiPath)
@@ -148,7 +152,7 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		semantics = s.parseHandlerSemantics(owner.pkg, owner.file, h.Body, mwParams, mwContextTypes)
 	}
 	if h, ok := call.Args[1].(*ast.Ident); ok {
-		if fm := s.funcsByPkg[owner.pkg][h.Name]; fm != nil {
+		if fm := s.resolveFuncInScope(owner.file, owner.pkg, h.Name); fm != nil {
 			semantics = s.parseHandlerSemantics(fm.pkg, fm.file, fm.decl.Body, mwParams, mwContextTypes)
 			handlerName = h.Name
 			doc := parseRouteDoc(fm.decl.Doc)
@@ -166,6 +170,14 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 			}
 		}
 	}
+	if len(tags) == 0 {
+		if inferred := inferTagFromPath(openapiPath); inferred != "" {
+			tags = []string{inferred}
+			if _, ok := s.tagDescriptions[inferred]; !ok {
+				s.tagDescriptions[inferred] = ""
+			}
+		}
+	}
 
 	s.routes = append(s.routes, model.Route{
 		Method:       sel.Sel.Name,
@@ -175,6 +187,7 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		Description:  description,
 		Tags:         tags,
 		AuthRequired: state.authRequired || hasAuthMiddleware(call.Args[2:]),
+		AuthSchemes:  dedupeStrings(mergeMiddlewareNames(state.authSchemes, mwAuthSchemes)),
 		Middlewares:  routeMiddlewares,
 		Parameters:   mergeParameters(pathParamNames, semantics.parameters),
 		RequestBody:  semantics.requestBody,
@@ -183,25 +196,87 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	return true
 }
 
-func (s *parserState) tryRouterCall(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) {
+func (s *parserState) tryRouterCall(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) bool {
 	if len(call.Args) == 0 {
-		return
+		return false
 	}
 	callee := s.resolveCallee(owner, call.Fun)
 	if callee == nil || callee.decl.Type.Params == nil || len(callee.decl.Type.Params.List) == 0 {
-		return
+		return false
 	}
 	firstParam := callee.decl.Type.Params.List[0]
-	if !isEchoGroupType(firstParam.Type) || len(firstParam.Names) == 0 {
-		return
+	if !isEchoRouterType(firstParam.Type) || len(firstParam.Names) == 0 {
+		return false
 	}
 	argState, ok := resolveGroupState(call.Args[0], env)
 	if !ok {
-		return
+		return false
 	}
 	paramName := firstParam.Names[0].Name
 	key := fmt.Sprintf("%s.%s@%s#%t", callee.pkg, callee.name, argState.prefix, argState.authRequired)
 	s.parseFunction(callee, map[string]groupState{paramName: argState}, key)
+	return true
+}
+
+func (s *parserState) tryBootstrapRouterCall(owner *funcMeta, call *ast.CallExpr) {
+	if len(call.Args) != 0 {
+		return
+	}
+	callee := s.resolveCallee(owner, call.Fun)
+	if callee == nil || callee.decl == nil || callee.decl.Body == nil {
+		return
+	}
+	if callee.decl.Type.Params != nil && len(callee.decl.Type.Params.List) > 0 {
+		return
+	}
+	if !s.looksLikeRouteSetup(callee) {
+		return
+	}
+	key := fmt.Sprintf("%s.%s@bootstrap", callee.pkg, callee.name)
+	s.parseFunction(callee, map[string]groupState{}, key)
+}
+
+func (s *parserState) looksLikeRouteSetup(fm *funcMeta) bool {
+	if fm == nil || fm.decl == nil || fm.decl.Body == nil {
+		return false
+	}
+	key := fm.pkg + "." + fm.name
+	if hinted, ok := s.routeSetupHints[key]; ok {
+		return hinted
+	}
+
+	looksLike := false
+	ast.Inspect(fm.decl.Body, func(n ast.Node) bool {
+		if looksLike {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch sel.Sel.Name {
+		case "New":
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "echo" {
+				looksLike = true
+				return false
+			}
+		case "Group", "Use":
+			looksLike = true
+			return false
+		default:
+			if httpMethods[sel.Sel.Name] {
+				looksLike = true
+				return false
+			}
+		}
+		return true
+	})
+	s.routeSetupHints[key] = looksLike
+	return looksLike
 }
 
 func (s *parserState) tryGroupUse(call *ast.CallExpr, env map[string]groupState) bool {
@@ -220,6 +295,7 @@ func (s *parserState) tryGroupUse(call *ast.CallExpr, env map[string]groupState)
 	if hasAuthMiddleware(call.Args) {
 		state.authRequired = true
 	}
+	state.authSchemes = dedupeStrings(mergeMiddlewareNames(state.authSchemes, inferAuthSchemesFromNames(middlewareNamesFromArgs(call.Args))))
 	state.middlewares = mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(call.Args))
 	env[recv.Name] = state
 	return true
@@ -249,7 +325,7 @@ func isAuthMiddlewareExpr(expr ast.Expr) bool {
 
 func looksLikeAuthName(name string) bool {
 	v := strings.ToLower(name)
-	return strings.Contains(v, "auth") || strings.Contains(v, "jwt") || strings.Contains(v, "token") || strings.Contains(v, "apikey")
+	return strings.Contains(v, "auth") || strings.Contains(v, "jwt") || strings.Contains(v, "bearer") || strings.Contains(v, "apikey") || strings.Contains(v, "session")
 }
 
 func middlewareNamesFromArgs(args []ast.Expr) []string {
@@ -316,6 +392,11 @@ func (s *parserState) resolveCalleeByPkg(pkg string, file *fileCtx, fun ast.Expr
 		importPath := file.imports[pkgAlias.Name]
 		if importPath == "" {
 			return nil
+		}
+		if byName := s.funcsByImportPath[importPath]; byName != nil {
+			if fm := byName[n.Sel.Name]; fm != nil {
+				return fm
+			}
 		}
 		return s.funcsByPkg[filepath.Base(importPath)][n.Sel.Name]
 	default:
