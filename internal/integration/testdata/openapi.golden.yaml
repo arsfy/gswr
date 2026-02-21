@@ -1,0 +1,455 @@
+openapi: 3.0.3
+info:
+    title: Example Echo v5
+    version: 0.0.1
+    description: Example Project
+servers:
+    - url: /api/
+tags:
+    - name: system
+    - name: user
+paths:
+    /api/v1/status:
+        get:
+            operationId: status
+            summary: Get service status
+            description: Returns health and version information of the service.
+            tags:
+                - system
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    healthy:
+                                        type: boolean
+                                        enum:
+                                            - true
+                                    version:
+                                        type: number
+                                        enum:
+                                            - 1
+                                required:
+                                    - code
+                                    - healthy
+                                    - version
+    /api/v1/user/{id}:
+        get:
+            operationId: detail
+            summary: Get user detail
+            description: Returns user detail by ID and includes trace information from request header.
+            tags:
+                - user
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Trace-Id
+                  in: header
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    extras:
+                                        $ref: '#/components/schemas/user_LabelMap'
+                                    id:
+                                        type: string
+                                    profile:
+                                        type: object
+                                        properties:
+                                            labels:
+                                                $ref: '#/components/schemas/user_LabelMap'
+                                            nickname:
+                                                type: string
+                                                enum:
+                                                    - tom
+                                        required:
+                                            - nickname
+        post:
+            operationId: edit
+            summary: Edit user
+            description: Edits user profile fields with helper-based parsing.
+            tags:
+                - user
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: age
+                  in: query
+                  schema:
+                    type: string
+                - name: email
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            age:
+                                                type: number
+                                            email:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            id:
+                                                type: number
+                                        required:
+                                            - age
+                                            - email
+                                            - id
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - id <= 0
+    /api/v1/user/{id}/profile:
+        put:
+            operationId: updateProfile
+            summary: put /api/v1/user/{id}/profile
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: X-Trace-Id
+                  in: header
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                labels:
+                                    $ref: '#/components/schemas/user_LabelMap'
+                                profile:
+                                    $ref: '#/components/schemas/user_Profile'
+                            required:
+                                - profile
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    extras:
+                                        $ref: '#/components/schemas/user_LabelMap'
+                                    id:
+                                        type: string
+                                    profile:
+                                        $ref: '#/components/schemas/user_Profile'
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - bad_request
+                                required:
+                                    - code
+    /api/v1/user/create:
+        post:
+            operationId: create
+            summary: post /api/v1/user/create
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name:
+                                    type: string
+                                profile:
+                                    $ref: '#/components/schemas/user_Profile'
+                            required:
+                                - name
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    extras:
+                                        $ref: '#/components/schemas/user_LabelMap'
+                                    id:
+                                        type: string
+                                    profile:
+                                        type: object
+                                        properties:
+                                            labels:
+                                                $ref: '#/components/schemas/user_LabelMap'
+                                            nickname:
+                                                type: string
+                                        required:
+                                            - nickname
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - bad_request
+                                required:
+                                    - code
+    /api/v1/user/create/post:
+        post:
+            operationId: createForm
+            summary: post /api/v1/user/create/post
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            parameters:
+                - name: email
+                  in: query
+                  schema:
+                    type: string
+                - name: name
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - A
+                                    data:
+                                        type: object
+                                        properties:
+                                            email:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            name:
+                                                type: string
+                                        required:
+                                            - email
+                                            - name
+    /api/v1/user/list:
+        get:
+            operationId: list
+            summary: Get user list
+            description: Returns user list data with pagination parameters page and size.
+            tags:
+                - user
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+                - ListMiddleware
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: size
+                  in: query
+                  description: Per page size
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: 200OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            data:
+                                                type: string
+                                                enum:
+                                                    - a
+                                            page:
+                                                type: number
+                                            size:
+                                                type: number
+                                        required:
+                                            - data
+                                            - page
+                                            - size
+                "400":
+                    description: Empty
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - page == 0
+    /api/v1/user/search:
+        get:
+            operationId: search
+            summary: Search users
+            description: Demonstrates user search using query and header input parameters.
+            tags:
+                - user
+            security:
+                - bearerAuth: []
+            x-middlewares:
+                - AuthMiddleware
+            parameters:
+                - name: active
+                  in: query
+                  schema:
+                    type: boolean
+                - name: keyword
+                  in: query
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  required: true
+                  schema:
+                    type: number
+                - name: tag
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: X-Trace-Id
+                  in: header
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    active:
+                                        type: boolean
+                                    keyword:
+                                        type: string
+                                    page:
+                                        type: number
+                                required:
+                                    - active
+                                    - keyword
+                                    - page
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - bad_request
+                                required:
+                                    - code
+components:
+    schemas:
+        user_Label:
+            type: object
+            properties:
+                display:
+                    type: string
+            required:
+                - display
+        user_LabelMap:
+            type: object
+            additionalProperties:
+                $ref: '#/components/schemas/user_Label'
+        user_Profile:
+            type: object
+            properties:
+                labels:
+                    $ref: '#/components/schemas/user_LabelMap'
+                nickname:
+                    type: string
+            required:
+                - nickname
+    securitySchemes:
+        bearerAuth:
+            type: http
+            scheme: bearer
+            bearerFormat: JWT

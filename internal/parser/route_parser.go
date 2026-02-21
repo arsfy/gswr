@@ -1,0 +1,324 @@
+package parser
+
+import (
+	"fmt"
+	"go/ast"
+	"path/filepath"
+	"strings"
+
+	"golang-openapi/internal/model"
+)
+
+func (s *parserState) parseFunction(fn *funcMeta, argGroups map[string]groupState, callKey string) {
+	if fn.decl.Body == nil {
+		return
+	}
+	if callKey != "" {
+		if s.visitingKey[callKey] {
+			return
+		}
+		s.visitingKey[callKey] = true
+		defer delete(s.visitingKey, callKey)
+	}
+
+	env := map[string]groupState{}
+	for k, v := range argGroups {
+		env[k] = v
+	}
+	s.walkStmts(fn, fn.decl.Body.List, env)
+}
+
+func (s *parserState) walkStmts(owner *funcMeta, stmts []ast.Stmt, env map[string]groupState) {
+	for _, st := range stmts {
+		switch n := st.(type) {
+		case *ast.AssignStmt:
+			s.handleAssign(n, env)
+		case *ast.ExprStmt:
+			s.handleCallExpr(owner, n.X, env)
+		case *ast.BlockStmt:
+			s.walkStmts(owner, n.List, cloneGroupStateMap(env))
+		case *ast.IfStmt:
+			if n.Init != nil {
+				s.walkStmts(owner, []ast.Stmt{n.Init}, env)
+			}
+			s.walkStmts(owner, n.Body.List, cloneGroupStateMap(env))
+			if n.Else != nil {
+				s.handleElse(owner, n.Else, cloneGroupStateMap(env))
+			}
+		}
+	}
+}
+
+func (s *parserState) handleElse(owner *funcMeta, st ast.Stmt, env map[string]groupState) {
+	switch e := st.(type) {
+	case *ast.BlockStmt:
+		s.walkStmts(owner, e.List, env)
+	case *ast.IfStmt:
+		s.walkStmts(owner, []ast.Stmt{e}, env)
+	}
+}
+
+func (s *parserState) handleAssign(st *ast.AssignStmt, env map[string]groupState) {
+	if len(st.Lhs) != 1 || len(st.Rhs) != 1 {
+		return
+	}
+	lhs, ok := st.Lhs[0].(*ast.Ident)
+	if !ok {
+		return
+	}
+	call, ok := st.Rhs[0].(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return
+	}
+	if sel.Sel.Name == "New" && recv.Name == "echo" {
+		env[lhs.Name] = groupState{prefix: ""}
+		return
+	}
+	if sel.Sel.Name != "Group" || len(call.Args) == 0 {
+		return
+	}
+	base, ok := env[recv.Name]
+	if !ok {
+		return
+	}
+	p, ok := stringLiteral(call.Args[0])
+	if !ok {
+		return
+	}
+	env[lhs.Name] = groupState{
+		prefix:       joinPath(base.prefix, p),
+		authRequired: base.authRequired,
+		middlewares:  append([]string(nil), base.middlewares...),
+	}
+}
+
+func (s *parserState) handleCallExpr(owner *funcMeta, expr ast.Expr, env map[string]groupState) {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	if s.tryGroupUse(call, env) {
+		return
+	}
+	if s.tryRoute(owner, call, env) {
+		return
+	}
+	s.tryRouterCall(owner, call, env)
+}
+
+func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	if !httpMethods[sel.Sel.Name] || len(call.Args) < 2 {
+		return false
+	}
+	state, ok := env[recv.Name]
+	if !ok {
+		return false
+	}
+	p, ok := stringLiteral(call.Args[0])
+	if !ok {
+		return false
+	}
+	echoPath := joinPath(state.prefix, p)
+	openapiPath, pathParamNames := normalizeEchoPath(echoPath)
+	routeMiddlewares := mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(call.Args[2:]))
+	mwParams, mwContextTypes := s.collectMiddlewareSemantics(owner.pkg, routeMiddlewares)
+
+	semantics := handlerSemantics{responses: []model.Response{{StatusCode: 200, Description: "OK", Schema: &model.Schema{Type: "object"}}}}
+	handlerName := normalizeOperationID(sel.Sel.Name, openapiPath)
+	summary := strings.ToLower(sel.Sel.Name) + " " + openapiPath
+	description := ""
+	tags := []string{}
+	if h, ok := call.Args[1].(*ast.FuncLit); ok {
+		semantics = s.parseHandlerSemantics(owner.pkg, owner.file, h.Body, mwParams, mwContextTypes)
+	}
+	if h, ok := call.Args[1].(*ast.Ident); ok {
+		if fm := s.funcsByPkg[owner.pkg][h.Name]; fm != nil {
+			semantics = s.parseHandlerSemantics(fm.pkg, fm.file, fm.decl.Body, mwParams, mwContextTypes)
+			handlerName = h.Name
+			doc := parseRouteDoc(fm.decl.Doc)
+			if doc.summary != "" || doc.description != "" || len(doc.tags) > 0 {
+				if doc.summary != "" {
+					summary = doc.summary
+				}
+				description = doc.description
+				tags = doc.tags
+				for _, t := range tags {
+					if _, ok := s.tagDescriptions[t]; !ok {
+						s.tagDescriptions[t] = ""
+					}
+				}
+			}
+		}
+	}
+
+	s.routes = append(s.routes, model.Route{
+		Method:       sel.Sel.Name,
+		Path:         openapiPath,
+		OperationID:  handlerName,
+		Summary:      summary,
+		Description:  description,
+		Tags:         tags,
+		AuthRequired: state.authRequired || hasAuthMiddleware(call.Args[2:]),
+		Middlewares:  routeMiddlewares,
+		Parameters:   mergeParameters(pathParamNames, semantics.parameters),
+		RequestBody:  semantics.requestBody,
+		Responses:    semantics.responses,
+	})
+	return true
+}
+
+func (s *parserState) tryRouterCall(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) {
+	if len(call.Args) == 0 {
+		return
+	}
+	callee := s.resolveCallee(owner, call.Fun)
+	if callee == nil || callee.decl.Type.Params == nil || len(callee.decl.Type.Params.List) == 0 {
+		return
+	}
+	firstParam := callee.decl.Type.Params.List[0]
+	if !isEchoGroupType(firstParam.Type) || len(firstParam.Names) == 0 {
+		return
+	}
+	argState, ok := resolveGroupState(call.Args[0], env)
+	if !ok {
+		return
+	}
+	paramName := firstParam.Names[0].Name
+	key := fmt.Sprintf("%s.%s@%s#%t", callee.pkg, callee.name, argState.prefix, argState.authRequired)
+	s.parseFunction(callee, map[string]groupState{paramName: argState}, key)
+}
+
+func (s *parserState) tryGroupUse(call *ast.CallExpr, env map[string]groupState) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Use" {
+		return false
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	state, ok := env[recv.Name]
+	if !ok {
+		return false
+	}
+	if hasAuthMiddleware(call.Args) {
+		state.authRequired = true
+	}
+	state.middlewares = mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(call.Args))
+	env[recv.Name] = state
+	return true
+}
+
+func hasAuthMiddleware(args []ast.Expr) bool {
+	for _, a := range args {
+		if isAuthMiddlewareExpr(a) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthMiddlewareExpr(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return looksLikeAuthName(n.Name)
+	case *ast.SelectorExpr:
+		return looksLikeAuthName(n.Sel.Name)
+	case *ast.CallExpr:
+		return isAuthMiddlewareExpr(n.Fun)
+	default:
+		return false
+	}
+}
+
+func looksLikeAuthName(name string) bool {
+	v := strings.ToLower(name)
+	return strings.Contains(v, "auth") || strings.Contains(v, "jwt") || strings.Contains(v, "token") || strings.Contains(v, "apikey")
+}
+
+func middlewareNamesFromArgs(args []ast.Expr) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		if name, ok := middlewareName(a); ok && name != "" {
+			out = append(out, name)
+		}
+	}
+	return dedupeStrings(out)
+}
+
+func middlewareName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.SelectorExpr:
+		return n.Sel.Name, true
+	case *ast.CallExpr:
+		return middlewareName(n.Fun)
+	default:
+		return "", false
+	}
+}
+
+func mergeMiddlewareNames(a, b []string) []string {
+	out := append([]string(nil), a...)
+	out = append(out, b...)
+	return dedupeStrings(out)
+}
+
+func dedupeStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if v == "" || seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+func (s *parserState) resolveCallee(owner *funcMeta, fun ast.Expr) *funcMeta {
+	return s.resolveCalleeByPkg(owner.pkg, owner.file, fun)
+}
+
+func (s *parserState) resolveCalleeByPkg(pkg string, file *fileCtx, fun ast.Expr) *funcMeta {
+	switch n := fun.(type) {
+	case *ast.Ident:
+		return s.funcsByPkg[pkg][n.Name]
+	case *ast.SelectorExpr:
+		if file == nil {
+			return nil
+		}
+		pkgAlias, ok := n.X.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		importPath := file.imports[pkgAlias.Name]
+		if importPath == "" {
+			return nil
+		}
+		return s.funcsByPkg[filepath.Base(importPath)][n.Sel.Name]
+	default:
+		return nil
+	}
+}
