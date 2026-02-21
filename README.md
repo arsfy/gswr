@@ -1,5 +1,8 @@
 # GoSemRoute
 
+![Golang](https://img.shields.io/badge/-Golang%201.26-17333d?style=flat-square&logo=go&logoColor=white)
+![OpenAPI](https://img.shields.io/badge/-OpenAPI%203-2e6614?style=flat-square)
+
 Semantic OpenAPI generator for Go projects.
 
 GoSemRoute focuses on **semantic recognition**, not only annotation parsing.  
