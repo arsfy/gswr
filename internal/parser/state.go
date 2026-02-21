@@ -4,7 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 var httpMethods = map[string]bool{

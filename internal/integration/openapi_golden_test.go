@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gswr/internal/parser"
-	"gswr/internal/renderer"
+	"github.com/arsfy/gswr/internal/parser"
+	"github.com/arsfy/gswr/internal/renderer"
 )
 
 func TestOpenAPIGenerationGolden(t *testing.T) {

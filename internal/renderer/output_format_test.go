@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func TestWriteJSON(t *testing.T) {

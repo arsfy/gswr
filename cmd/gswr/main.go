@@ -7,8 +7,8 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"gswr/internal/parser"
-	"gswr/internal/renderer"
+	"github.com/arsfy/gswr/internal/parser"
+	"github.com/arsfy/gswr/internal/renderer"
 
 	"github.com/spf13/cobra"
 )

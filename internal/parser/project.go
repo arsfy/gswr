@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func ParseEchoProject(entry string) (*model.IR, error) {

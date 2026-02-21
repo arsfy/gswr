@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func (s *parserState) parseHandlerSemantics(pkg string, file *fileCtx, body *ast.BlockStmt, inheritedParams []model.Parameter, contextTypes map[string]ast.Expr) handlerSemantics {

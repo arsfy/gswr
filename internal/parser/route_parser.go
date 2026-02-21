@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func (s *parserState) parseFunction(fn *funcMeta, argGroups map[string]groupState, callKey string) {

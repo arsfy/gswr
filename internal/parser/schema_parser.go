@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func (s *parserState) schemaFromExpr(pkg string, file *fileCtx, expr ast.Expr) *model.Schema {

@@ -3,7 +3,7 @@ package parser
 import (
 	"go/ast"
 
-	"gswr/internal/model"
+	"github.com/arsfy/gswr/internal/model"
 )
 
 func (s *parserState) collectMiddlewareSemantics(pkg string, middlewareNames []string) ([]model.Parameter, map[string]ast.Expr) {

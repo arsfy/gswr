@@ -1,4 +1,4 @@
-module gswr
+module github.com/arsfy/gswr
 
 go 1.26.0
 
