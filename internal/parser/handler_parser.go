@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 func (s *parserState) parseHandlerSemantics(pkg string, file *fileCtx, body *ast.BlockStmt, inheritedParams []model.Parameter, contextTypes map[string]ast.Expr) handlerSemantics {

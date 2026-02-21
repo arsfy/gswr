@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strconv"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 func (s *parserState) schemaFromExpr(pkg string, file *fileCtx, expr ast.Expr) *model.Schema {

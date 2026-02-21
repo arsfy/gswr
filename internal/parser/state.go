@@ -4,7 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 var httpMethods = map[string]bool{

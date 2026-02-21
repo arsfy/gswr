@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang-openapi/internal/parser"
-	"golang-openapi/internal/renderer"
+	"gswr/internal/parser"
+	"gswr/internal/renderer"
 )
 
 func main() {

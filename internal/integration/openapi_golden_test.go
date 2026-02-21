@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang-openapi/internal/parser"
-	"golang-openapi/internal/renderer"
+	"gswr/internal/parser"
+	"gswr/internal/renderer"
 )
 
 func TestOpenAPIGenerationGolden(t *testing.T) {
@@ -32,7 +32,7 @@ func TestOpenAPIGenerationGolden(t *testing.T) {
 	}
 
 	if string(got) != string(want) {
-		t.Fatalf("golden mismatch: %s\nregenerate with: GOCACHE=/tmp/go-build-cache go run ./cmd/openapi-gen --entry tests/example-echo/main.go --out docs/openapi.yaml && cp docs/openapi.yaml internal/integration/testdata/openapi.golden.yaml", wantPath)
+		t.Fatalf("golden mismatch: %s\nregenerate with: GOCACHE=/tmp/go-build-cache go run ./cmd/gswr --entry tests/example-echo/main.go --out docs/openapi.yaml && cp docs/openapi.yaml internal/integration/testdata/openapi.golden.yaml", wantPath)
 	}
 }
 

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 func TestWriteJSON(t *testing.T) {

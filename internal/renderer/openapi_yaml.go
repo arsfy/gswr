@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"golang-openapi/internal/model"
 	"gopkg.in/yaml.v3"
+	"gswr/internal/model"
 )
 
 type openAPIDoc struct {

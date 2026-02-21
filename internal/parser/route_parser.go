@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 func (s *parserState) parseFunction(fn *funcMeta, argGroups map[string]groupState, callKey string) {

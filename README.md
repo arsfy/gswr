@@ -17,23 +17,31 @@ It walks routing code, follows helper wrappers, and infers request/response sche
 
 ## Quick Start
 
+Install CLI:
+
+```bash
+go install github.com/arsfy/gswr/cmd/gswr@latest
+```
+
+Run from source:
+
 Generate YAML:
 
 ```bash
-go run ./cmd/openapi-gen --entry ./main.go --out docs/openapi.yaml
+gswr --entry ./main.go --out docs/openapi.yaml
 ```
 
 Generate JSON:
 
 ```bash
-go run ./cmd/openapi-gen --entry ./main.go --out docs/openapi.json
+gswr --entry ./main.go --out docs/openapi.json
 ```
 
 Force format explicitly:
 
 ```bash
-go run ./cmd/openapi-gen --entry ./main.go --out docs/openapi.out --format json
-go run ./cmd/openapi-gen --entry ./main.go --out docs/openapi.out --format yaml
+gswr --entry ./main.go --out docs/openapi.out --format json
+gswr --entry ./main.go --out docs/openapi.out --format yaml
 ```
 
 ## Why Semantic Recognition

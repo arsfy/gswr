@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"golang-openapi/internal/model"
+	"gswr/internal/model"
 )
 
 func ParseEchoProject(entry string) (*model.IR, error) {

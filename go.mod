@@ -1,4 +1,4 @@
-module golang-openapi
+module gswr
 
 go 1.26.0
 
