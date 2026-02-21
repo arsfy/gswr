@@ -29,32 +29,56 @@ func (s *parserState) parseHandlerSemantics(pkg string, file *fileCtx, body *ast
 func (s *parserState) parseHandlerResponses(pkg string, file *fileCtx, body *ast.BlockStmt, varTypes map[string]ast.Expr, varValues map[string]ast.Expr) []model.Response {
 	byCode := map[int]model.Response{}
 	order := make([]int, 0, 4)
+	addResponse := func(r model.Response, desc string) {
+		code := r.StatusCode
+		if desc != "" {
+			r.Description = desc
+		}
+		if r.Description == "" {
+			r.Description = responseDescription(code)
+		}
+		if _, exists := byCode[code]; !exists {
+			order = append(order, code)
+		}
+		byCode[code] = r
+	}
 
 	ast.Inspect(body, func(n ast.Node) bool {
-		ret, ok := n.(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
-			return true
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
 		}
-		resps := s.extractResponsesFromExpr(pkg, file, ret.Results[0], varTypes, varValues, nil, 0)
-		if len(resps) == 0 {
-			return true
-		}
-		desc := ""
-		if file != nil && s.fset != nil {
-			desc = inlineCommentForNode(s.fset, file.astFile, ret)
-		}
-		for _, r := range resps {
-			code := r.StatusCode
-			if desc != "" {
-				r.Description = desc
+		switch x := n.(type) {
+		case *ast.ReturnStmt:
+			if len(x.Results) != 1 {
+				return true
 			}
-			if r.Description == "" {
-				r.Description = responseDescription(code)
+			resps := s.extractResponsesFromExpr(pkg, file, x.Results[0], varTypes, varValues, nil, 0)
+			if len(resps) == 0 {
+				return true
 			}
-			if _, exists := byCode[code]; !exists {
-				order = append(order, code)
+			desc := ""
+			if file != nil && s.fset != nil {
+				desc = inlineCommentForNode(s.fset, file.astFile, x)
 			}
-			byCode[code] = r
+			for _, r := range resps {
+				addResponse(r, desc)
+			}
+		case *ast.ExprStmt:
+			call, ok := x.X.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			resps := s.extractResponsesFromExpr(pkg, file, call, varTypes, varValues, nil, 0)
+			if len(resps) == 0 {
+				return true
+			}
+			desc := ""
+			if file != nil && s.fset != nil {
+				desc = inlineCommentForNode(s.fset, file.astFile, x)
+			}
+			for _, r := range resps {
+				addResponse(r, desc)
+			}
 		}
 		return true
 	})
@@ -78,6 +102,9 @@ func (s *parserState) extractResponsesFromExpr(pkg string, file *fileCtx, expr a
 	if !ok {
 		return nil
 	}
+	if helperResp := s.tryExtractHelperResponse(pkg, file, call, varTypes, bindings); len(helperResp) > 0 {
+		return helperResp
+	}
 	if r, ok := s.extractJSONResponseFromCall(pkg, file, call, varTypes, varValues, bindings); ok {
 		return []model.Response{r}
 	}
@@ -95,23 +122,76 @@ func (s *parserState) extractResponsesFromExpr(pkg string, file *fileCtx, expr a
 	for _, p := range fm.decl.Type.Params.List {
 		for _, name := range p.Names {
 			if argIdx < len(call.Args) {
-				localBindings[name.Name] = resolveBindingExpr(call.Args[argIdx], bindings)
+				localBindings[name.Name] = resolveExprWithContext(call.Args[argIdx], bindings, varValues, map[string]bool{})
 			}
 			argIdx++
 		}
 	}
 
 	out := make([]model.Response, 0, 2)
-	for _, st := range fm.decl.Body.List {
-		ret, ok := st.(*ast.ReturnStmt)
-		if !ok || len(ret.Results) == 0 {
-			continue
+	ast.Inspect(fm.decl.Body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
 		}
-		for _, r := range ret.Results {
-			out = append(out, s.extractResponsesFromExpr(fm.pkg, fm.file, resolveBindingExpr(r, localBindings), varTypes, varValues, localBindings, depth+1)...)
+		switch x := n.(type) {
+		case *ast.ReturnStmt:
+			for _, r := range x.Results {
+				out = append(out, s.extractResponsesFromExpr(fm.pkg, fm.file, resolveExprWithContext(r, localBindings, varValues, map[string]bool{}), varTypes, varValues, localBindings, depth+1)...)
+			}
+		case *ast.ExprStmt:
+			call, ok := x.X.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			out = append(out, s.extractResponsesFromExpr(fm.pkg, fm.file, resolveExprWithContext(call, localBindings, varValues, map[string]bool{}), varTypes, varValues, localBindings, depth+1)...)
 		}
-	}
+		return true
+	})
 	return dedupeResponsesByCode(out)
+}
+
+func (s *parserState) tryExtractHelperResponse(pkg string, file *fileCtx, call *ast.CallExpr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) []model.Response {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	switch sel.Sel.Name {
+	case "Success":
+		if len(call.Args) < 2 {
+			return nil
+		}
+		dataExpr := resolveExprWithContext(call.Args[1], bindings, nil, map[string]bool{})
+		dataSchema := s.schemaFromExprWithVarsAndBindings(pkg, file, dataExpr, varTypes, bindings)
+		return []model.Response{{
+			StatusCode:  200,
+			Description: "OK",
+			Schema: &model.Schema{
+				Type: "object",
+				Properties: map[string]*model.Schema{
+					"code": {Type: "string", Enum: []any{"ok"}},
+					"data": dataSchema,
+				},
+			},
+		}}
+	case "BadRequest":
+		if len(call.Args) < 2 {
+			return nil
+		}
+		msg := resolveExprWithContext(call.Args[1], bindings, nil, map[string]bool{})
+		msgSchema := s.schemaFromExprWithVarsAndBindings(pkg, file, msg, varTypes, bindings)
+		return []model.Response{{
+			StatusCode:  400,
+			Description: "Client Error",
+			Schema: &model.Schema{
+				Type: "object",
+				Properties: map[string]*model.Schema{
+					"code": msgSchema,
+				},
+			},
+		}}
+	default:
+		return nil
+	}
 }
 
 func (s *parserState) extractJSONResponseFromCall(pkg string, file *fileCtx, call *ast.CallExpr, varTypes map[string]ast.Expr, varValues map[string]ast.Expr, bindings map[string]ast.Expr) (model.Response, bool) {
@@ -119,16 +199,27 @@ func (s *parserState) extractJSONResponseFromCall(pkg string, file *fileCtx, cal
 	if !ok || sel.Sel.Name != "JSON" || len(call.Args) < 2 {
 		return model.Response{}, false
 	}
-	statusExpr := resolveBindingExpr(call.Args[0], bindings)
-	bodyExpr := resolveBindingExpr(call.Args[1], bindings)
+	statusExpr := resolveExprWithContext(call.Args[0], bindings, varValues, map[string]bool{})
+	bodyExpr := resolveExprWithContext(call.Args[1], bindings, varValues, map[string]bool{})
 	code, ok := resolveStatusCode(statusExpr, varValues, map[string]bool{})
 	if !ok {
 		code = 200
 	}
+	schema := s.schemaFromExprWithVarsAndBindings(pkg, file, bodyExpr, varTypes, bindings)
+	if schema != nil && bindings != nil && schema.Type == "object" {
+		if dataSchema, ok := schema.Properties["data"]; ok && dataSchema != nil && dataSchema.Type == "object" && len(dataSchema.Properties) == 0 {
+			if bound, ok := bindings["data"]; ok && bound != nil {
+				inferred := s.schemaFromExprWithVarsAndBindings(pkg, file, bound, varTypes, bindings)
+				if inferred != nil && (len(inferred.Properties) > 0 || inferred.Items != nil || inferred.Ref != "" || inferred.Type != "object") {
+					schema.Properties["data"] = inferred
+				}
+			}
+		}
+	}
 	return model.Response{
 		StatusCode:  code,
 		Description: responseDescription(code),
-		Schema:      s.schemaFromExprWithVarsAndBindings(pkg, file, bodyExpr, varTypes, bindings),
+		Schema:      schema,
 	}, true
 }
 
@@ -234,9 +325,12 @@ func (s *parserState) parseHandlerInputs(pkg string, file *fileCtx, body *ast.Bl
 	var requestBody *model.Schema
 
 	ast.Inspect(body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
+		}
 		switch x := n.(type) {
 		case *ast.AssignStmt:
-			s.collectInputParameterFromAssign(params, file, x)
+			s.collectInputParameterFromAssign(pkg, file, params, x, varTypes)
 		case *ast.CallExpr:
 			s.collectInputParameter(params, x)
 			s.collectInputParameterFromHelper(pkg, file, params, x, 0, nil)
@@ -264,21 +358,62 @@ func (s *parserState) parseHandlerInputs(pkg string, file *fileCtx, body *ast.Bl
 	return out, requestBody
 }
 
-func (s *parserState) collectInputParameterFromAssign(params map[string]model.Parameter, file *fileCtx, st *ast.AssignStmt) {
+func (s *parserState) collectInputParameterFromAssign(pkg string, file *fileCtx, params map[string]model.Parameter, st *ast.AssignStmt, varTypes map[string]ast.Expr) {
 	if file == nil || s.fset == nil {
 		return
 	}
 	desc := inlineCommentForNode(s.fset, file.astFile, st)
-	calls := parameterCallsInExpr(st.Rhs)
-	for _, call := range calls {
-		mergeParameter(params, model.Parameter{
-			Name:        call.name,
-			In:          call.in,
-			Required:    call.required,
-			Description: desc,
-			Schema:      &model.Schema{Type: "string"},
-		})
+	for i, rhs := range st.Rhs {
+		schema := s.schemaFromAssignTarget(pkg, file, st, i, varTypes)
+		if schema == nil {
+			schema = &model.Schema{Type: "string"}
+		}
+
+		directCalls := parameterCallsInExpr([]ast.Expr{rhs})
+		for _, call := range directCalls {
+			mergeParameter(params, model.Parameter{
+				Name:        call.name,
+				In:          call.in,
+				Required:    call.required,
+				Description: desc,
+				Schema:      schema,
+			})
+		}
+
+		call, ok := rhs.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		helperParams := map[string]model.Parameter{}
+		s.collectInputParameterFromHelper(pkg, file, helperParams, call, 0, nil)
+		for _, p := range helperParams {
+			p.Description = desc
+			p.Schema = schema
+			mergeParameter(params, p)
+		}
 	}
+}
+
+func (s *parserState) schemaFromAssignTarget(pkg string, file *fileCtx, st *ast.AssignStmt, rhsIdx int, varTypes map[string]ast.Expr) *model.Schema {
+	if rhsIdx < 0 || rhsIdx >= len(st.Rhs) || len(st.Lhs) == 0 {
+		return nil
+	}
+	lhsIdx := rhsIdx
+	if len(st.Rhs) == 1 {
+		lhsIdx = 0
+	}
+	if lhsIdx < 0 || lhsIdx >= len(st.Lhs) {
+		return nil
+	}
+	lhs, ok := st.Lhs[lhsIdx].(*ast.Ident)
+	if !ok || lhs.Name == "_" || varTypes == nil {
+		return nil
+	}
+	t, ok := varTypes[lhs.Name]
+	if !ok {
+		return nil
+	}
+	return s.schemaFromTypeExpr(pkg, file, t)
 }
 
 type parameterCall struct {
@@ -309,6 +444,13 @@ func parseParameterCall(call *ast.CallExpr) (parameterCall, bool) {
 	if !ok || len(call.Args) == 0 {
 		return parameterCall{}, false
 	}
+	if sel.Sel.Name == "GetHeader" {
+		name, ok := stringLiteral(call.Args[0])
+		if !ok || name == "" {
+			return parameterCall{}, false
+		}
+		return parameterCall{name: name, in: "header", required: false}, true
+	}
 	name, ok := stringLiteral(call.Args[0])
 	if !ok || name == "" {
 		return parameterCall{}, false
@@ -316,7 +458,7 @@ func parseParameterCall(call *ast.CallExpr) (parameterCall, bool) {
 	switch sel.Sel.Name {
 	case "Param":
 		return parameterCall{name: name, in: "path", required: true}, true
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
 		return parameterCall{name: name, in: "query", required: false}, true
 	case "Get":
 		if isHeaderGetReceiver(sel.X) {
@@ -350,6 +492,9 @@ func (s *parserState) collectInputParameterFromHelper(pkg string, file *fileCtx,
 	}
 
 	ast.Inspect(fm.decl.Body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
+		}
 		innerCall, ok := n.(*ast.CallExpr)
 		if !ok {
 			return true
@@ -372,6 +517,13 @@ func parseParameterCallWithBindings(call *ast.CallExpr, bindings map[string]ast.
 	if !ok || len(call.Args) == 0 {
 		return parameterCall{}, false
 	}
+	if sel.Sel.Name == "GetHeader" {
+		name, ok := stringLiteral(resolveBindingExpr(call.Args[0], bindings))
+		if !ok || name == "" {
+			return parameterCall{}, false
+		}
+		return parameterCall{name: name, in: "header", required: false}, true
+	}
 	name, ok := stringLiteral(resolveBindingExpr(call.Args[0], bindings))
 	if !ok || name == "" {
 		return parameterCall{}, false
@@ -379,7 +531,7 @@ func parseParameterCallWithBindings(call *ast.CallExpr, bindings map[string]ast.
 	switch sel.Sel.Name {
 	case "Param":
 		return parameterCall{name: name, in: "path", required: true}, true
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
 		return parameterCall{name: name, in: "query", required: false}, true
 	case "Get":
 		if isHeaderGetReceiver(sel.X) {
@@ -400,10 +552,39 @@ func resolveBindingExpr(expr ast.Expr, bindings map[string]ast.Expr) ast.Expr {
 	return expr
 }
 
+func resolveExprWithContext(expr ast.Expr, bindings map[string]ast.Expr, values map[string]ast.Expr, visiting map[string]bool) ast.Expr {
+	id, ok := expr.(*ast.Ident)
+	if !ok {
+		return expr
+	}
+	if bindings != nil {
+		if v, ok := bindings[id.Name]; ok && v != nil && v != expr {
+			return resolveExprWithContext(v, bindings, values, visiting)
+		}
+	}
+	if values == nil {
+		return expr
+	}
+	if visiting[id.Name] {
+		return expr
+	}
+	v, ok := values[id.Name]
+	if !ok || v == nil || v == expr {
+		return expr
+	}
+	visiting[id.Name] = true
+	resolved := resolveExprWithContext(v, bindings, values, visiting)
+	delete(visiting, id.Name)
+	return resolved
+}
+
 func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr) (map[string]ast.Expr, map[string]ast.Expr) {
 	varTypes := map[string]ast.Expr{}
 	varValues := map[string]ast.Expr{}
 	ast.Inspect(body, func(n ast.Node) bool {
+		if _, ok := n.(*ast.FuncLit); ok {
+			return false
+		}
 		switch x := n.(type) {
 		case *ast.ValueSpec:
 			if x.Type == nil {
@@ -472,8 +653,10 @@ func (s *parserState) collectInputParameter(params map[string]model.Parameter, c
 	switch sel.Sel.Name {
 	case "Param":
 		add("path", true)
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
 		add("query", false)
+	case "GetHeader":
+		add("header", false)
 	case "Get":
 		if isHeaderGetReceiver(sel.X) {
 			add("header", false)
@@ -483,17 +666,32 @@ func (s *parserState) collectInputParameter(params map[string]model.Parameter, c
 
 func (s *parserState) tryParseBindSemantics(pkg string, file *fileCtx, call *ast.CallExpr, varTypes map[string]ast.Expr) ([]model.Parameter, *model.Schema) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Bind" || len(call.Args) != 1 {
+	if !ok || len(call.Args) != 1 {
+		return nil, nil
+	}
+	hint := ""
+	switch sel.Sel.Name {
+	case "Bind", "ShouldBind", "MustBindWith":
+		hint = ""
+	case "ShouldBindJSON":
+		hint = "json"
+	case "ShouldBindQuery":
+		hint = "query"
+	case "ShouldBindUri":
+		hint = "path"
+	case "ShouldBindHeader":
+		hint = "header"
+	default:
 		return nil, nil
 	}
 	boundType, ok := boundTypeFromArg(call.Args[0], varTypes)
 	if !ok {
 		return nil, nil
 	}
-	return s.bindTypeSemantics(pkg, file, boundType)
+	return s.bindTypeSemantics(pkg, file, boundType, hint)
 }
 
-func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.Expr) ([]model.Parameter, *model.Schema) {
+func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.Expr, hint string) ([]model.Parameter, *model.Schema) {
 	resolvedPkg, resolvedFile, st := s.resolveStructType(pkg, file, typeExpr)
 	if st == nil {
 		return nil, s.schemaFromTypeExpr(pkg, file, typeExpr)
@@ -512,18 +710,33 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 		required := fieldRequired(f.Tag)
 
 		pathName, pathOK := tagLookup(f.Tag, "param")
+		if !pathOK {
+			pathName, pathOK = tagLookup(f.Tag, "uri")
+		}
 		if pathOK && pathName != "" && pathName != "-" {
-			params = append(params, model.Parameter{Name: pathName, In: "path", Required: true, Schema: fieldSchema})
+			if hint == "" || hint == "path" {
+				params = append(params, model.Parameter{Name: pathName, In: "path", Required: true, Schema: fieldSchema})
+			}
 		}
 		queryName, queryOK := tagLookup(f.Tag, "query")
+		if !queryOK {
+			queryName, queryOK = tagLookup(f.Tag, "form")
+		}
 		if queryOK && queryName != "" && queryName != "-" {
-			params = append(params, model.Parameter{Name: queryName, In: "query", Required: required, Schema: fieldSchema})
+			if hint == "" || hint == "query" {
+				params = append(params, model.Parameter{Name: queryName, In: "query", Required: required, Schema: fieldSchema})
+			}
 		}
 		headerName, headerOK := tagLookup(f.Tag, "header")
 		if headerOK && headerName != "" && headerName != "-" {
-			params = append(params, model.Parameter{Name: headerName, In: "header", Required: required, Schema: fieldSchema})
+			if hint == "" || hint == "header" {
+				params = append(params, model.Parameter{Name: headerName, In: "header", Required: required, Schema: fieldSchema})
+			}
 		}
 
+		if hint == "query" || hint == "path" || hint == "header" {
+			continue
+		}
 		jsonName, hasJSON := tagLookup(f.Tag, "json")
 		hasParamLike := pathOK || queryOK || headerOK
 		if hasJSON {
@@ -582,6 +795,15 @@ func (s *parserState) resolveStructType(pkg string, file *fileCtx, typeExpr ast.
 		importPath := file.imports[alias.Name]
 		if importPath == "" {
 			return "", nil, nil
+		}
+		if byName := s.namedTypesByImport[importPath]; byName != nil {
+			if meta := byName[t.Sel.Name]; meta != nil {
+				st, ok := meta.typeExpr.(*ast.StructType)
+				if !ok {
+					return "", nil, nil
+				}
+				return meta.pkg, meta.file, st
+			}
 		}
 		targetPkg := filepath.Base(importPath)
 		meta := s.namedTypesByPkg[targetPkg][t.Sel.Name]
@@ -664,7 +886,7 @@ func inferTypeFromCall(call *ast.CallExpr) (ast.Expr, bool) {
 		return nil, false
 	}
 	switch sel.Sel.Name {
-	case "Param", "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Get":
+	case "Param", "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm", "Get", "GetHeader":
 		return ast.NewIdent("string"), true
 	case "ParseInt", "ParseFloat", "Atoi":
 		return ast.NewIdent("int64"), true

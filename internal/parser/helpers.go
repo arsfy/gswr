@@ -155,12 +155,8 @@ func lowerFirst(s string) string {
 	return strings.ToLower(s[:1]) + s[1:]
 }
 
-func isEchoGroupType(t ast.Expr) bool {
-	return isEchoNamedType(t, "Group")
-}
-
 func isEchoRouterType(t ast.Expr) bool {
-	return isEchoNamedType(t, "Group") || isEchoNamedType(t, "Echo")
+	return isEchoNamedType(t, "Group") || isEchoNamedType(t, "Echo") || isGinNamedType(t, "RouterGroup") || isGinNamedType(t, "Engine")
 }
 
 func isEchoNamedType(t ast.Expr, name string) bool {
@@ -171,11 +167,18 @@ func isEchoNamedType(t ast.Expr, name string) bool {
 	if !ok {
 		return false
 	}
-	id, ok := sel.X.(*ast.Ident)
+	return sel.Sel.Name == name
+}
+
+func isGinNamedType(t ast.Expr, name string) bool {
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
+	}
+	sel, ok := t.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
-	return id.Name == "echo" && sel.Sel.Name == name
+	return sel.Sel.Name == name
 }
 
 func stringLiteral(expr ast.Expr) (string, bool) {
@@ -264,10 +267,11 @@ func resolveGroupState(expr ast.Expr, env map[string]groupState) (groupState, bo
 		groupMiddlewares := middlewareNamesFromArgs(n.Args[1:])
 		groupAuthSchemes := inferAuthSchemesFromNames(groupMiddlewares)
 		return groupState{
-			prefix:       joinPath(base.prefix, p),
-			authRequired: base.authRequired || hasAuthMiddleware(n.Args[1:]),
-			authSchemes:  mergeMiddlewareNames(base.authSchemes, groupAuthSchemes),
-			middlewares:  mergeMiddlewareNames(base.middlewares, groupMiddlewares),
+			prefix:         joinPath(base.prefix, p),
+			callConvention: base.callConvention,
+			authRequired:   base.authRequired || hasAuthMiddleware(n.Args[1:]),
+			authSchemes:    mergeMiddlewareNames(base.authSchemes, groupAuthSchemes),
+			middlewares:    mergeMiddlewareNames(base.middlewares, groupMiddlewares),
 		}, true
 	default:
 		return groupState{}, false

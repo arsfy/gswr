@@ -47,11 +47,19 @@ type parserState struct {
 	routes               []model.Route
 }
 
+type routeCallConvention int
+
+const (
+	routeCallConventionHandlerSecond routeCallConvention = iota
+	routeCallConventionHandlerLast
+)
+
 type groupState struct {
-	prefix       string
-	authRequired bool
-	authSchemes  []string
-	middlewares  []string
+	prefix         string
+	callConvention routeCallConvention
+	authRequired   bool
+	authSchemes    []string
+	middlewares    []string
 }
 
 type funcMeta struct {

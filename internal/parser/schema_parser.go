@@ -126,6 +126,9 @@ func (s *parserState) schemaFromCompositeLit(pkg string, file *fileCtx, lit *ast
 	if st != nil {
 		return s.schemaFromStructLiteral(resolvedPkg, resolvedFile, st, lit.Elts, varTypes, bindings)
 	}
+	if keyed := s.schemaFromKeyedObjectLiteral(pkg, file, lit.Elts, varTypes, bindings); keyed != nil {
+		return keyed
+	}
 	return s.schemaFromTypeExpr(pkg, file, lit.Type)
 }
 
@@ -153,12 +156,20 @@ func (s *parserState) schemaFromStructLiteral(pkg string, file *fileCtx, st *ast
 			continue
 		}
 		present[fm.jsonName] = true
-		if id, ok := kv.Value.(*ast.Ident); ok && id.Name == "nil" && fm.omitempty {
+		resolvedVal := kv.Value
+		if id, ok := kv.Value.(*ast.Ident); ok {
+			if bindings != nil {
+				if bound, ok := bindings[id.Name]; ok && bound != nil {
+					resolvedVal = bound
+				}
+			}
+		}
+		if id, ok := resolvedVal.(*ast.Ident); ok && id.Name == "nil" && fm.omitempty {
 			delete(base.Properties, fm.jsonName)
 			base.Required = removeRequiredField(base.Required, fm.jsonName)
 			continue
 		}
-		literal := s.schemaFromLiteralValueExpr(pkg, file, kv.Value, varTypes, bindings)
+		literal := s.schemaFromLiteralValueExpr(pkg, file, resolvedVal, varTypes, bindings)
 		declared := s.schemaFromTypeExpr(pkg, file, fm.typ)
 		base.Properties[fm.jsonName] = mergeLiteralSchema(declared, literal)
 	}
@@ -264,6 +275,27 @@ func (s *parserState) schemaFromMapLiteral(pkg string, file *fileCtx, mt *ast.Ma
 		key, ok := stringLiteral(kv.Key)
 		if !ok || key == "" {
 			return fallback
+		}
+		props[key] = s.schemaFromLiteralValueExpr(pkg, file, kv.Value, varTypes, bindings)
+		required = append(required, key)
+	}
+	return &model.Schema{Type: "object", Properties: props, Required: dedupeSorted(required)}
+}
+
+func (s *parserState) schemaFromKeyedObjectLiteral(pkg string, file *fileCtx, elts []ast.Expr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
+	if len(elts) == 0 {
+		return nil
+	}
+	props := map[string]*model.Schema{}
+	required := make([]string, 0, len(elts))
+	for _, elt := range elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			return nil
+		}
+		key, ok := stringLiteral(kv.Key)
+		if !ok || key == "" {
+			return nil
 		}
 		props[key] = s.schemaFromLiteralValueExpr(pkg, file, kv.Value, varTypes, bindings)
 		required = append(required, key)

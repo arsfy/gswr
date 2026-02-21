@@ -44,7 +44,7 @@ func (s *parserState) collectMiddlewareSemanticsWithAuth(pkg string, file *fileC
 		ast.Inspect(inner, func(n ast.Node) bool {
 			switch x := n.(type) {
 			case *ast.AssignStmt:
-				s.collectInputParameterFromAssign(params, fm.file, x)
+				s.collectInputParameterFromAssign(fm.pkg, fm.file, params, x, varTypes)
 			case *ast.CallExpr:
 				s.collectInputParameter(params, x)
 				s.captureContextSetType(contextTypes, varTypes, x)

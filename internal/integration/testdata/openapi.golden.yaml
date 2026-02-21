@@ -71,14 +71,24 @@ paths:
                                 type: object
                                 properties:
                                     extras:
-                                        $ref: '#/components/schemas/user_LabelMap'
+                                        type: object
+                                        properties:
+                                            extra:
+                                                type: object
+                                        required:
+                                            - extra
                                     id:
                                         type: string
                                     profile:
                                         type: object
                                         properties:
                                             labels:
-                                                $ref: '#/components/schemas/user_LabelMap'
+                                                type: object
+                                                properties:
+                                                    main:
+                                                        type: object
+                                                required:
+                                                    - main
                                             nickname:
                                                 type: string
                                                 enum:
@@ -100,11 +110,11 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: number
                 - name: age
                   in: query
                   schema:
-                    type: string
+                    type: number
                 - name: email
                   in: query
                   schema:
@@ -239,7 +249,12 @@ paths:
                                 type: object
                                 properties:
                                     extras:
-                                        $ref: '#/components/schemas/user_LabelMap'
+                                        type: object
+                                        properties:
+                                            created:
+                                                type: object
+                                        required:
+                                            - created
                                     id:
                                         type: string
                                     profile:
@@ -323,12 +338,12 @@ paths:
                 - name: page
                   in: query
                   schema:
-                    type: string
+                    type: number
                 - name: size
                   in: query
                   description: Per page size
                   schema:
-                    type: string
+                    type: number
             responses:
                 "200":
                     description: 200OK

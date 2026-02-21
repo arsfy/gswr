@@ -12,8 +12,10 @@ It walks routing code, follows helper wrappers, and infers request/response sche
 
 - Supported:
     - [x] `echo` v5 / v4
+    - [x] `gin`
 - Planned: 
-    - [ ] `gin`
+    - [ ] `fiber`
+    - [ ] `chi`
 
 > This tool is optimized for real internal codebases, but it is still static analysis.  
 > If you hit unsupported patterns, open an issue with a minimal code sample.

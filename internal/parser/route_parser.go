@@ -32,7 +32,7 @@ func (s *parserState) walkStmts(owner *funcMeta, stmts []ast.Stmt, env map[strin
 	for _, st := range stmts {
 		switch n := st.(type) {
 		case *ast.AssignStmt:
-			s.handleAssign(n, env)
+			s.handleAssign(owner, n, env)
 		case *ast.ExprStmt:
 			s.handleCallExpr(owner, n.X, env)
 		case *ast.BlockStmt:
@@ -58,7 +58,7 @@ func (s *parserState) handleElse(owner *funcMeta, st ast.Stmt, env map[string]gr
 	}
 }
 
-func (s *parserState) handleAssign(st *ast.AssignStmt, env map[string]groupState) {
+func (s *parserState) handleAssign(owner *funcMeta, st *ast.AssignStmt, env map[string]groupState) {
 	if len(st.Lhs) != 1 || len(st.Rhs) != 1 {
 		return
 	}
@@ -78,8 +78,15 @@ func (s *parserState) handleAssign(st *ast.AssignStmt, env map[string]groupState
 	if !ok {
 		return
 	}
-	if sel.Sel.Name == "New" && recv.Name == "echo" {
-		env[lhs.Name] = groupState{prefix: ""}
+	if sel.Sel.Name == "New" {
+		framework := detectFrameworkFromSelector(owner.file, sel)
+		if framework == "" {
+			return
+		}
+		env[lhs.Name] = groupState{
+			prefix:         "",
+			callConvention: routeCallConventionForFramework(framework),
+		}
 		return
 	}
 	if sel.Sel.Name != "Group" || len(call.Args) == 0 {
@@ -94,10 +101,11 @@ func (s *parserState) handleAssign(st *ast.AssignStmt, env map[string]groupState
 		return
 	}
 	env[lhs.Name] = groupState{
-		prefix:       joinPath(base.prefix, p),
-		authRequired: base.authRequired || hasAuthMiddleware(call.Args[1:]),
-		authSchemes:  mergeMiddlewareNames(base.authSchemes, inferAuthSchemesFromNames(middlewareNamesFromArgs(call.Args[1:]))),
-		middlewares:  mergeMiddlewareNames(base.middlewares, middlewareNamesFromArgs(call.Args[1:])),
+		prefix:         joinPath(base.prefix, p),
+		callConvention: base.callConvention,
+		authRequired:   base.authRequired || hasAuthMiddleware(call.Args[1:]),
+		authSchemes:    mergeMiddlewareNames(base.authSchemes, inferAuthSchemesFromNames(middlewareNamesFromArgs(call.Args[1:]))),
+		middlewares:    mergeMiddlewareNames(base.middlewares, middlewareNamesFromArgs(call.Args[1:])),
 	}
 }
 
@@ -140,7 +148,11 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	}
 	echoPath := joinPath(state.prefix, p)
 	openapiPath, pathParamNames := normalizeEchoPath(echoPath)
-	routeMiddlewares := mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(call.Args[2:]))
+	handlerArg, routeMwArgs, ok := splitRouteHandlerAndMiddlewareArgs(call.Args, state.callConvention)
+	if !ok {
+		return false
+	}
+	routeMiddlewares := mergeMiddlewareNames(state.middlewares, middlewareNamesFromArgs(routeMwArgs))
 	mwParams, mwContextTypes, mwAuthSchemes := s.collectMiddlewareSemanticsWithAuth(owner.pkg, owner.file, routeMiddlewares)
 
 	semantics := handlerSemantics{responses: []model.Response{{StatusCode: 200, Description: "OK", Schema: &model.Schema{Type: "object"}}}}
@@ -148,24 +160,22 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	summary := strings.ToLower(sel.Sel.Name) + " " + openapiPath
 	description := ""
 	tags := []string{}
-	if h, ok := call.Args[1].(*ast.FuncLit); ok {
+	if h, ok := handlerArg.(*ast.FuncLit); ok {
 		semantics = s.parseHandlerSemantics(owner.pkg, owner.file, h.Body, mwParams, mwContextTypes)
 	}
-	if h, ok := call.Args[1].(*ast.Ident); ok {
-		if fm := s.resolveFuncInScope(owner.file, owner.pkg, h.Name); fm != nil {
-			semantics = s.parseHandlerSemantics(fm.pkg, fm.file, fm.decl.Body, mwParams, mwContextTypes)
-			handlerName = h.Name
-			doc := parseRouteDoc(fm.decl.Doc)
-			if doc.summary != "" || doc.description != "" || len(doc.tags) > 0 {
-				if doc.summary != "" {
-					summary = doc.summary
-				}
-				description = doc.description
-				tags = doc.tags
-				for _, t := range tags {
-					if _, ok := s.tagDescriptions[t]; !ok {
-						s.tagDescriptions[t] = ""
-					}
+	if fm := s.resolveCallee(owner, handlerArg); fm != nil {
+		semantics = s.parseHandlerSemantics(fm.pkg, fm.file, fm.decl.Body, mwParams, mwContextTypes)
+		handlerName = fm.name
+		doc := parseRouteDoc(fm.decl.Doc)
+		if doc.summary != "" || doc.description != "" || len(doc.tags) > 0 {
+			if doc.summary != "" {
+				summary = doc.summary
+			}
+			description = doc.description
+			tags = doc.tags
+			for _, t := range tags {
+				if _, ok := s.tagDescriptions[t]; !ok {
+					s.tagDescriptions[t] = ""
 				}
 			}
 		}
@@ -186,7 +196,7 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		Summary:      summary,
 		Description:  description,
 		Tags:         tags,
-		AuthRequired: state.authRequired || hasAuthMiddleware(call.Args[2:]),
+		AuthRequired: state.authRequired || hasAuthMiddleware(routeMwArgs),
 		AuthSchemes:  dedupeStrings(mergeMiddlewareNames(state.authSchemes, mwAuthSchemes)),
 		Middlewares:  routeMiddlewares,
 		Parameters:   mergeParameters(pathParamNames, semantics.parameters),
@@ -194,6 +204,57 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		Responses:    semantics.responses,
 	})
 	return true
+}
+
+func splitRouteHandlerAndMiddlewareArgs(args []ast.Expr, convention routeCallConvention) (ast.Expr, []ast.Expr, bool) {
+	if len(args) < 2 {
+		return nil, nil, false
+	}
+	if convention == routeCallConventionHandlerLast {
+		if len(args) == 2 {
+			return args[1], nil, true
+		}
+		return args[len(args)-1], args[1 : len(args)-1], true
+	}
+	if len(args) == 2 {
+		return args[1], nil, true
+	}
+	return args[1], args[2:], true
+}
+
+func routeCallConventionForFramework(framework string) routeCallConvention {
+	switch framework {
+	case "gin":
+		return routeCallConventionHandlerLast
+	default:
+		return routeCallConventionHandlerSecond
+	}
+}
+
+func detectFrameworkFromSelector(file *fileCtx, sel *ast.SelectorExpr) string {
+	if sel == nil {
+		return ""
+	}
+	xid, ok := sel.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	if file != nil && file.imports != nil {
+		if importPath := file.imports[xid.Name]; importPath != "" {
+			switch {
+			case strings.Contains(importPath, "github.com/labstack/echo"):
+				return "echo"
+			case strings.Contains(importPath, "github.com/gin-gonic/gin"):
+				return "gin"
+			}
+		}
+	}
+	switch xid.Name {
+	case "echo", "gin":
+		return xid.Name
+	default:
+		return ""
+	}
 }
 
 func (s *parserState) tryRouterCall(owner *funcMeta, call *ast.CallExpr, env map[string]groupState) bool {
@@ -260,7 +321,7 @@ func (s *parserState) looksLikeRouteSetup(fm *funcMeta) bool {
 		}
 		switch sel.Sel.Name {
 		case "New":
-			if id, ok := sel.X.(*ast.Ident); ok && id.Name == "echo" {
+			if detectFrameworkFromSelector(fm.file, sel) != "" {
 				looksLike = true
 				return false
 			}
