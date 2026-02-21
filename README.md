@@ -23,7 +23,7 @@ Install CLI:
 go install github.com/arsfy/gswr/cmd/gswr@latest
 ```
 
-Run from source:
+Run:
 
 Generate YAML:
 
