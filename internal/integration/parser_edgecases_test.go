@@ -100,6 +100,71 @@ func SelectorHandler(c echo.Context) error {
 	}
 }
 
+func TestParseGinLocalChannelTypeInference(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/ginedge
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import "github.com/gin-gonic/gin"
+
+func main() {
+	r := gin.New()
+	g := r.Group("/api")
+	g.GET("/book/:id", book)
+}
+
+func book(c *gin.Context) {
+	type translateResult struct {
+		title string
+	}
+	ch := make(chan translateResult, 1)
+	go func() {
+		ch <- translateResult{title: "ok"}
+	}()
+	res := <-ch
+	recommend := []int64{1, 2}
+	uid := c.GetInt64("uid")
+	c.JSON(200, gin.H{
+		"translate": res.title,
+		"recommend": recommend,
+		"uid":       uid,
+	})
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	var found bool
+	for _, r := range ir.Routes {
+		if r.Method != "GET" || r.Path != "/api/book/{id}" || len(r.Responses) == 0 {
+			continue
+		}
+		found = true
+		s := r.Responses[0].Schema
+		if s == nil || s.Properties["translate"] == nil || s.Properties["recommend"] == nil || s.Properties["uid"] == nil {
+			t.Fatalf("missing response properties: %#v", s)
+		}
+		if s.Properties["translate"].Type != "string" {
+			t.Fatalf("translate type mismatch: %#v", s.Properties["translate"])
+		}
+		if s.Properties["recommend"].Type != "array" {
+			t.Fatalf("recommend type mismatch: %#v", s.Properties["recommend"])
+		}
+		if s.Properties["uid"].Type != "number" {
+			t.Fatalf("uid type mismatch: %#v", s.Properties["uid"])
+		}
+	}
+	if !found {
+		t.Fatalf("missing GET /api/book/{id} route")
+	}
+}
+
 func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

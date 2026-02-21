@@ -458,8 +458,12 @@ func parseParameterCall(call *ast.CallExpr) (parameterCall, bool) {
 	switch sel.Sel.Name {
 	case "Param":
 		return parameterCall{name: name, in: "path", required: true}, true
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "DefaultQuery", "PostForm", "DefaultPostForm":
 		return parameterCall{name: name, in: "query", required: false}, true
+	case "Query":
+		if isLikelyRequestContextReceiver(sel.X) {
+			return parameterCall{name: name, in: "query", required: false}, true
+		}
 	case "Get":
 		if isHeaderGetReceiver(sel.X) {
 			return parameterCall{name: name, in: "header", required: false}, true
@@ -474,6 +478,9 @@ func (s *parserState) collectInputParameterFromHelper(pkg string, file *fileCtx,
 	}
 	fm := s.resolveCalleeByPkg(pkg, file, call.Fun)
 	if fm == nil || fm.decl == nil || fm.decl.Body == nil || fm.decl.Type.Params == nil {
+		return
+	}
+	if !funcHasContextParam(fm.decl) {
 		return
 	}
 
@@ -531,8 +538,12 @@ func parseParameterCallWithBindings(call *ast.CallExpr, bindings map[string]ast.
 	switch sel.Sel.Name {
 	case "Param":
 		return parameterCall{name: name, in: "path", required: true}, true
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "DefaultQuery", "PostForm", "DefaultPostForm":
 		return parameterCall{name: name, in: "query", required: false}, true
+	case "Query":
+		if isLikelyRequestContextReceiver(resolveBindingExpr(sel.X, bindings)) {
+			return parameterCall{name: name, in: "query", required: false}, true
+		}
 	case "Get":
 		if isHeaderGetReceiver(sel.X) {
 			return parameterCall{name: name, in: "header", required: false}, true
@@ -581,17 +592,30 @@ func resolveExprWithContext(expr ast.Expr, bindings map[string]ast.Expr, values 
 func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr) (map[string]ast.Expr, map[string]ast.Expr) {
 	varTypes := map[string]ast.Expr{}
 	varValues := map[string]ast.Expr{}
+	localTypes := map[string]ast.Expr{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		if _, ok := n.(*ast.FuncLit); ok {
 			return false
 		}
 		switch x := n.(type) {
+		case *ast.TypeSpec:
+			if x.Name != nil && x.Type != nil {
+				localTypes[x.Name.Name] = x.Type
+			}
 		case *ast.ValueSpec:
 			if x.Type == nil {
-				// keep walking to capture values below
+				for i, name := range x.Names {
+					if i >= len(x.Values) {
+						continue
+					}
+					knownTypes := mergeTypeMaps(contextTypes, varTypes)
+					if t, ok := s.inferTypeFromExprWithResolver(pkg, file, x.Values[i], knownTypes); ok {
+						varTypes[name.Name] = resolveLocalTypeExpr(t, localTypes)
+					}
+				}
 			} else {
 				for _, name := range x.Names {
-					varTypes[name.Name] = x.Type
+					varTypes[name.Name] = resolveLocalTypeExpr(x.Type, localTypes)
 				}
 			}
 			for i, name := range x.Names {
@@ -608,8 +632,9 @@ func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.Blo
 				if !ok {
 					continue
 				}
-				if t, ok := s.inferTypeFromExprWithResolver(pkg, file, x.Rhs[i], contextTypes); ok {
-					varTypes[lhs.Name] = t
+				knownTypes := mergeTypeMaps(contextTypes, varTypes)
+				if t, ok := s.inferTypeFromExprWithResolver(pkg, file, x.Rhs[i], knownTypes); ok {
+					varTypes[lhs.Name] = resolveLocalTypeExpr(t, localTypes)
 				}
 				varValues[lhs.Name] = x.Rhs[i]
 			}
@@ -617,6 +642,43 @@ func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.Blo
 		return true
 	})
 	return varTypes, varValues
+}
+
+func resolveLocalTypeExpr(t ast.Expr, localTypes map[string]ast.Expr) ast.Expr {
+	if t == nil || len(localTypes) == 0 {
+		return t
+	}
+	switch n := t.(type) {
+	case *ast.Ident:
+		if resolved, ok := localTypes[n.Name]; ok {
+			return resolved
+		}
+		return t
+	case *ast.ChanType:
+		return &ast.ChanType{Dir: n.Dir, Value: resolveLocalTypeExpr(n.Value, localTypes)}
+	case *ast.ArrayType:
+		return &ast.ArrayType{Len: n.Len, Elt: resolveLocalTypeExpr(n.Elt, localTypes)}
+	case *ast.MapType:
+		return &ast.MapType{Key: resolveLocalTypeExpr(n.Key, localTypes), Value: resolveLocalTypeExpr(n.Value, localTypes)}
+	case *ast.StarExpr:
+		return &ast.StarExpr{X: resolveLocalTypeExpr(n.X, localTypes)}
+	default:
+		return t
+	}
+}
+
+func mergeTypeMaps(a, b map[string]ast.Expr) map[string]ast.Expr {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	out := map[string]ast.Expr{}
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *parserState) inferTypeFromExprWithResolver(pkg string, file *fileCtx, expr ast.Expr, contextTypes map[string]ast.Expr) (ast.Expr, bool) {
@@ -632,6 +694,9 @@ func (s *parserState) inferTypeFromExprWithResolver(pkg string, file *fileCtx, e
 			return fm.decl.Type.Results.List[0].Type, true
 		}
 		return nil, false
+	case *ast.SelectorExpr:
+		_, _, t, ok := s.resolveExprTypeWithVars(pkg, file, n, contextTypes)
+		return t, ok
 	default:
 		return inferTypeFromExprWithContext(expr, contextTypes)
 	}
@@ -653,8 +718,12 @@ func (s *parserState) collectInputParameter(params map[string]model.Parameter, c
 	switch sel.Sel.Name {
 	case "Param":
 		add("path", true)
-	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm":
+	case "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "DefaultQuery", "PostForm", "DefaultPostForm":
 		add("query", false)
+	case "Query":
+		if isLikelyRequestContextReceiver(sel.X) {
+			add("query", false)
+		}
 	case "GetHeader":
 		add("header", false)
 	case "Get":
@@ -824,10 +893,29 @@ func inferTypeFromExprWithContext(expr ast.Expr, contextTypes map[string]ast.Exp
 	switch n := expr.(type) {
 	case *ast.CompositeLit:
 		return n.Type, true
+	case *ast.Ident:
+		if contextTypes != nil {
+			if t, ok := contextTypes[n.Name]; ok {
+				return t, true
+			}
+		}
+		return nil, false
 	case *ast.UnaryExpr:
 		if n.Op == token.AND {
 			if lit, ok := n.X.(*ast.CompositeLit); ok {
 				return lit.Type, true
+			}
+		}
+		if n.Op == token.ARROW {
+			if chType, ok := inferTypeFromExprWithContext(n.X, contextTypes); ok {
+				if ct, ok := chType.(*ast.ChanType); ok {
+					return ct.Value, true
+				}
+				if st, ok := chType.(*ast.StarExpr); ok {
+					if ct, ok := st.X.(*ast.ChanType); ok {
+						return ct.Value, true
+					}
+				}
 			}
 		}
 	case *ast.CallExpr:
@@ -881,17 +969,75 @@ func mergeParameterIntoSlice(dst *[]model.Parameter, p model.Parameter) {
 }
 
 func inferTypeFromCall(call *ast.CallExpr) (ast.Expr, bool) {
+	if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "make" && len(call.Args) > 0 {
+		return call.Args[0], true
+	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return nil, false
 	}
 	switch sel.Sel.Name {
-	case "Param", "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "Query", "DefaultQuery", "PostForm", "DefaultPostForm", "Get", "GetHeader":
+	case "Param", "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "DefaultQuery", "PostForm", "DefaultPostForm", "Get", "GetHeader":
+		return ast.NewIdent("string"), true
+	case "Query":
+		if isLikelyRequestContextReceiver(sel.X) {
+			return ast.NewIdent("string"), true
+		}
+		return nil, false
+	case "GetInt", "GetInt8", "GetInt16", "GetInt32", "GetInt64":
+		return ast.NewIdent("int64"), true
+	case "GetUint", "GetUint8", "GetUint16", "GetUint32", "GetUint64":
+		return ast.NewIdent("int64"), true
+	case "GetFloat32", "GetFloat64":
+		return ast.NewIdent("float64"), true
+	case "GetBool":
+		return ast.NewIdent("bool"), true
+	case "Sprintf":
 		return ast.NewIdent("string"), true
 	case "ParseInt", "ParseFloat", "Atoi":
 		return ast.NewIdent("int64"), true
 	default:
 		return nil, false
+	}
+}
+
+func isLikelyRequestContextReceiver(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		name := strings.ToLower(n.Name)
+		return name == "c" || name == "ctx" || name == "context" || strings.HasSuffix(name, "ctx")
+	case *ast.ParenExpr:
+		return isLikelyRequestContextReceiver(n.X)
+	case *ast.StarExpr:
+		return isLikelyRequestContextReceiver(n.X)
+	default:
+		return false
+	}
+}
+
+func funcHasContextParam(fd *ast.FuncDecl) bool {
+	if fd == nil || fd.Type == nil || fd.Type.Params == nil {
+		return false
+	}
+	for _, p := range fd.Type.Params.List {
+		if p == nil || p.Type == nil {
+			continue
+		}
+		if isContextTypeExpr(p.Type) {
+			return true
+		}
+	}
+	return false
+}
+
+func isContextTypeExpr(t ast.Expr) bool {
+	switch n := t.(type) {
+	case *ast.StarExpr:
+		return isContextTypeExpr(n.X)
+	case *ast.SelectorExpr:
+		return n.Sel.Name == "Context"
+	default:
+		return false
 	}
 }
 
