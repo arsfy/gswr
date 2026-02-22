@@ -100,7 +100,7 @@ Generated `200` schema will include a typed `data.id` field instead of a generic
 func edit(c *echo.Context) error {
 	id, _ := resp.ParseIDParam(c, "id")
 	age := resp.ParseIntForm(c, "age", 18)
-	email := c.FormValueOr("email", "default@example.com")
+	email := c.FormValueOr("email", "default@example.com") // Description 🎉
 
 	if id <= 0 {
 		return resp.BadRequest(c, "id <= 0")
@@ -112,7 +112,7 @@ func edit(c *echo.Context) error {
 		"email": []string{
 			email,
 		},
-	})
+	}) // Response Description 🎉
 }
 ```
 
@@ -140,11 +140,12 @@ func edit(c *echo.Context) error {
                 type: number
             - name: email
                 in: query
+                description: "Description 🎉"
                 schema:
                 type: string
         responses:
             "200":
-                description: OK
+                description: "Response Description 🎉"
                 content:
                     application/json:
                         schema:

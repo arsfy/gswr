@@ -128,7 +128,7 @@ func createForm(c *echo.Context) error {
 func edit(c *echo.Context) error {
 	id, _ := resp.ParseIDParam(c, "id")
 	age := resp.ParseIntForm(c, "age", 18)
-	email := c.FormValueOr("email", "default@example.com")
+	email := c.FormValueOr("email", "default@example.com") // Description 🎉
 
 	if id <= 0 {
 		return resp.BadRequest(c, "id <= 0")
@@ -140,7 +140,7 @@ func edit(c *echo.Context) error {
 		"email": []string{
 			email,
 		},
-	})
+	}) // Response Description 🎉
 }
 
 // @summary Search users
