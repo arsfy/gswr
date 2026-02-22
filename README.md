@@ -89,6 +89,99 @@ func List(c *echo.Context) error {
 
 Generated `200` schema will include a typed `data.id` field instead of a generic object.
 
+### Example API
+
+> package `resp` is a secondary abstraction layer for input and output handling.
+
+```go
+// @summary Edit user
+// @description Edits user profile fields with helper-based parsing.
+// @Tags user
+func edit(c *echo.Context) error {
+	id, _ := resp.ParseIDParam(c, "id")
+	age := resp.ParseIntForm(c, "age", 18)
+	email := c.FormValueOr("email", "default@example.com")
+
+	if id <= 0 {
+		return resp.BadRequest(c, "id <= 0")
+	}
+
+	return resp.Success(c, map[string]any{
+		"id":  id,
+		"age": age,
+		"email": []string{
+			email,
+		},
+	})
+}
+```
+
+```yaml
+/api/v1/user/{id}:
+    post:
+        operationId: edit
+        summary: Edit user
+        description: Edits user profile fields with helper-based parsing.
+        tags:
+            - user
+        security:
+            - header_Authorization: []
+        x-middlewares:
+            - AuthMiddleware
+        parameters:
+            - name: id
+                in: path
+                required: true
+                schema:
+                type: number
+            - name: age
+                in: query
+                schema:
+                type: number
+            - name: email
+                in: query
+                schema:
+                type: string
+        responses:
+            "200":
+                description: OK
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                code:
+                                    type: string
+                                    enum:
+                                        - ok
+                                data:
+                                    type: object
+                                    properties:
+                                        age:
+                                            type: number
+                                        email:
+                                            type: array
+                                            items:
+                                                type: string
+                                        id:
+                                            type: number
+                                    required:
+                                        - age
+                                        - email
+                                        - id
+            "400":
+                description: Client Error
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                code:
+                                    type: string
+                                    enum:
+                                        - id <= 0
+```
+
 ## Current Limitations
 
 - Dynamic runtime-only patterns (reflection-heavy dispatch, generated handlers) may not be fully resolved
