@@ -117,11 +117,12 @@ paths:
                     type: number
                 - name: email
                   in: query
+                  description: "Description \U0001F389"
                   schema:
                     type: string
             responses:
                 "200":
-                    description: OK
+                    description: "Response Description \U0001F389"
                     content:
                         application/json:
                             schema:

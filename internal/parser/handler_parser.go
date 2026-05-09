@@ -770,12 +770,42 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 	bodyProps := map[string]*model.Schema{}
 	bodyRequired := make([]string, 0, 2)
 
+	s.collectBindStructFields(resolvedPkg, resolvedFile, st, hint, map[*ast.StructType]bool{}, &params, bodyProps, &bodyRequired)
+
+	if len(bodyProps) == 0 {
+		return params, nil
+	}
+	return params, &model.Schema{Type: "object", Properties: bodyProps, Required: dedupeSorted(bodyRequired)}
+}
+
+func (s *parserState) collectBindStructFields(pkg string, file *fileCtx, st *ast.StructType, hint string, seen map[*ast.StructType]bool, params *[]model.Parameter, bodyProps map[string]*model.Schema, bodyRequired *[]string) {
+	if seen[st] {
+		return
+	}
+	seen[st] = true
+	defer delete(seen, st)
+
 	for _, f := range st.Fields.List {
-		if len(f.Names) == 0 {
+		if len(f.Names) != 0 || hasExplicitJSONNameFromTag(f.Tag) {
 			continue
 		}
-		fieldName := f.Names[0].Name
-		fieldSchema := s.schemaFromTypeExpr(resolvedPkg, resolvedFile, f.Type)
+		embeddedPkg, embeddedFile, embeddedStruct := s.resolveStructType(pkg, file, f.Type)
+		if embeddedStruct != nil {
+			s.collectBindStructFields(embeddedPkg, embeddedFile, embeddedStruct, hint, seen, params, bodyProps, bodyRequired)
+		}
+	}
+
+	for _, f := range st.Fields.List {
+		if len(f.Names) == 0 && !hasExplicitJSONNameFromTag(f.Tag) {
+			if _, _, embeddedStruct := s.resolveStructType(pkg, file, f.Type); embeddedStruct != nil {
+				continue
+			}
+		}
+		fieldName, ok := bindFieldName(f)
+		if !ok {
+			continue
+		}
+		fieldSchema := s.schemaFromTypeExpr(pkg, file, f.Type)
 		required := fieldRequired(f.Tag)
 
 		pathName, pathOK := tagLookup(f.Tag, "param")
@@ -784,7 +814,7 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 		}
 		if pathOK && pathName != "" && pathName != "-" {
 			if hint == "" || hint == "path" {
-				params = append(params, model.Parameter{Name: pathName, In: "path", Required: true, Schema: fieldSchema})
+				*params = append(*params, model.Parameter{Name: pathName, In: "path", Required: true, Schema: fieldSchema})
 			}
 		}
 		queryName, queryOK := tagLookup(f.Tag, "query")
@@ -793,13 +823,13 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 		}
 		if queryOK && queryName != "" && queryName != "-" {
 			if hint == "" || hint == "query" {
-				params = append(params, model.Parameter{Name: queryName, In: "query", Required: required, Schema: fieldSchema})
+				*params = append(*params, model.Parameter{Name: queryName, In: "query", Required: required, Schema: fieldSchema})
 			}
 		}
 		headerName, headerOK := tagLookup(f.Tag, "header")
 		if headerOK && headerName != "" && headerName != "-" {
 			if hint == "" || hint == "header" {
-				params = append(params, model.Parameter{Name: headerName, In: "header", Required: required, Schema: fieldSchema})
+				*params = append(*params, model.Parameter{Name: headerName, In: "header", Required: required, Schema: fieldSchema})
 			}
 		}
 
@@ -818,7 +848,7 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 			}
 			bodyProps[name] = fieldSchema
 			if required {
-				bodyRequired = append(bodyRequired, name)
+				*bodyRequired = append(*bodyRequired, name)
 			}
 			continue
 		}
@@ -826,15 +856,22 @@ func (s *parserState) bindTypeSemantics(pkg string, file *fileCtx, typeExpr ast.
 			name := lowerFirst(fieldName)
 			bodyProps[name] = fieldSchema
 			if required {
-				bodyRequired = append(bodyRequired, name)
+				*bodyRequired = append(*bodyRequired, name)
 			}
 		}
 	}
+}
 
-	if len(bodyProps) == 0 {
-		return params, nil
+func bindFieldName(f *ast.Field) (string, bool) {
+	if len(f.Names) > 0 {
+		return f.Names[0].Name, true
 	}
-	return params, &model.Schema{Type: "object", Properties: bodyProps, Required: dedupeSorted(bodyRequired)}
+	return embeddedFieldName(f.Type)
+}
+
+func hasExplicitJSONNameFromTag(tag *ast.BasicLit) bool {
+	name, ok := tagLookup(tag, "json")
+	return ok && name != ""
 }
 
 func (s *parserState) resolveStructType(pkg string, file *fileCtx, typeExpr ast.Expr) (string, *fileCtx, *ast.StructType) {

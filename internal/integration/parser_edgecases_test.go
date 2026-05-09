@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/arsfy/gswr/internal/model"
 	"github.com/arsfy/gswr/internal/parser"
 )
 
@@ -163,6 +164,117 @@ func book(c *gin.Context) {
 	if !found {
 		t.Fatalf("missing GET /api/book/{id} route")
 	}
+}
+
+func TestParseEmbeddedStructFields(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/embededge
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	_type "example.com/embededge/types"
+	"github.com/gin-gonic/gin"
+)
+
+type ProductGroupResponse struct {
+	_type.ProductGroup
+	Products []_type.Product `+"`json:\"products\"`"+`
+}
+
+type CreateProductGroupRequest struct {
+	_type.ProductGroup
+	Products []_type.Product `+"`json:\"products\" binding:\"required\"`"+`
+}
+
+func main() {
+	r := gin.New()
+	g := r.Group("/api")
+	g.GET("/products", listProducts)
+	g.POST("/products", createProducts)
+}
+
+func listProducts(c *gin.Context) {
+	c.JSON(200, ProductGroupResponse{})
+}
+
+func createProducts(c *gin.Context) {
+	var req CreateProductGroupRequest
+	_ = c.ShouldBindJSON(&req)
+	c.JSON(200, req)
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "types", "product.go"), `package _type
+
+type ProductGroup struct {
+	GroupID string `+"`json:\"group_id\" binding:\"required\"`"+`
+	Name    string `+"`json:\"name\"`"+`
+}
+
+type Product struct {
+	SKU string `+"`json:\"sku\"`"+`
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	var getSchema *model.Schema
+	var postSchema *model.Schema
+	for i := range ir.Routes {
+		r := ir.Routes[i]
+		switch {
+		case r.Method == "GET" && r.Path == "/api/products":
+			if len(r.Responses) > 0 {
+				getSchema = r.Responses[0].Schema
+			}
+		case r.Method == "POST" && r.Path == "/api/products":
+			postSchema = r.RequestBody
+		}
+	}
+	if getSchema == nil {
+		t.Fatalf("missing GET /api/products route")
+	}
+	if postSchema == nil {
+		t.Fatalf("missing POST /api/products route")
+	}
+
+	assertEmbeddedProductGroupSchema(t, "response", getSchema)
+	assertEmbeddedProductGroupSchema(t, "request body", postSchema)
+}
+
+func assertEmbeddedProductGroupSchema(t *testing.T, label string, s *model.Schema) {
+	t.Helper()
+	if s == nil {
+		t.Fatalf("%s schema missing", label)
+	}
+	for _, name := range []string{"group_id", "name", "products"} {
+		if s.Properties[name] == nil {
+			t.Fatalf("%s schema missing property %q: %#v", label, name, s.Properties)
+		}
+	}
+	if s.Properties["productGroup"] != nil {
+		t.Fatalf("%s schema should not keep embedded field as productGroup: %#v", label, s.Properties)
+	}
+	if s.Properties["products"].Type != "array" {
+		t.Fatalf("%s products should be array, got %#v", label, s.Properties["products"])
+	}
+	if !containsString(s.Required, "group_id") {
+		t.Fatalf("%s should inherit required group_id, got %#v", label, s.Required)
+	}
+}
+
+func containsString(items []string, target string) bool {
+	for _, item := range items {
+		if item == target {
+			return true
+		}
+	}
+	return false
 }
 
 func mustWriteFile(t *testing.T, path, content string) {

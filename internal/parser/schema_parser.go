@@ -103,12 +103,37 @@ func (s *parserState) resolveSelectorFieldType(pkg string, file *fileCtx, sel *a
 	if st == nil {
 		return "", nil, nil, false
 	}
+	return s.resolveStructFieldType(resolvedPkg, resolvedFile, st, sel.Sel.Name, map[*ast.StructType]bool{})
+}
+
+func (s *parserState) resolveStructFieldType(pkg string, file *fileCtx, st *ast.StructType, name string, seen map[*ast.StructType]bool) (string, *fileCtx, ast.Expr, bool) {
+	if seen[st] {
+		return "", nil, nil, false
+	}
+	seen[st] = true
+	defer delete(seen, st)
+
 	for _, f := range st.Fields.List {
 		if len(f.Names) == 0 {
 			continue
 		}
-		if f.Names[0].Name == sel.Sel.Name {
-			return resolvedPkg, resolvedFile, f.Type, true
+		if f.Names[0].Name == name {
+			return pkg, file, f.Type, true
+		}
+	}
+	for _, f := range st.Fields.List {
+		if len(f.Names) != 0 {
+			continue
+		}
+		if embeddedName, ok := embeddedFieldName(f.Type); ok && embeddedName == name {
+			return pkg, file, f.Type, true
+		}
+		embeddedPkg, embeddedFile, embeddedStruct := s.resolveStructType(pkg, file, f.Type)
+		if embeddedStruct == nil {
+			continue
+		}
+		if fieldPkg, fieldFile, fieldType, ok := s.resolveStructFieldType(embeddedPkg, embeddedFile, embeddedStruct, name, seen); ok {
+			return fieldPkg, fieldFile, fieldType, true
 		}
 	}
 	return "", nil, nil, false
@@ -138,7 +163,7 @@ func (s *parserState) schemaFromStructLiteral(pkg string, file *fileCtx, st *ast
 		return base
 	}
 
-	fieldMap := structFieldMeta(st)
+	fieldMap := s.structFieldMeta(pkg, file, st)
 	present := map[string]bool{}
 	allKeyed := true
 	for _, elt := range elts {
@@ -171,6 +196,11 @@ func (s *parserState) schemaFromStructLiteral(pkg string, file *fileCtx, st *ast
 		}
 		literal := s.schemaFromLiteralValueExpr(pkg, file, resolvedVal, varTypes, bindings)
 		declared := s.schemaFromTypeExpr(pkg, file, fm.typ)
+		if fm.embedded {
+			merged := mergeLiteralSchema(declared, literal)
+			mergeEmbeddedSchema(base, merged)
+			continue
+		}
 		base.Properties[fm.jsonName] = mergeLiteralSchema(declared, literal)
 	}
 	if allKeyed {
@@ -188,12 +218,29 @@ type fieldMeta struct {
 	jsonName  string
 	typ       ast.Expr
 	omitempty bool
+	embedded  bool
 }
 
-func structFieldMeta(st *ast.StructType) map[string]fieldMeta {
+func (s *parserState) structFieldMeta(pkg string, file *fileCtx, st *ast.StructType) map[string]fieldMeta {
 	out := map[string]fieldMeta{}
 	for _, f := range st.Fields.List {
 		if len(f.Names) == 0 {
+			name, ok := embeddedFieldName(f.Type)
+			if !ok {
+				continue
+			}
+			jsonName, ignore := jsonFieldName(name, f.Tag)
+			if ignore {
+				continue
+			}
+			_, hasJSON := tagLookup(f.Tag, "json")
+			_, _, embeddedStruct := s.resolveStructType(pkg, file, f.Type)
+			out[name] = fieldMeta{
+				jsonName:  jsonName,
+				typ:       f.Type,
+				omitempty: jsonHasOmitEmpty(f.Tag),
+				embedded:  embeddedStruct != nil && !hasExplicitJSONName(f.Tag, hasJSON),
+			}
 			continue
 		}
 		name := f.Names[0].Name
@@ -346,8 +393,51 @@ func (s *parserState) schemaFromNamedMeta(meta *namedTypeMeta) *model.Schema {
 }
 
 func (s *parserState) schemaFromStruct(pkg string, file *fileCtx, st *ast.StructType) *model.Schema {
+	return s.schemaFromStructWithSeen(pkg, file, st, map[*ast.StructType]bool{})
+}
+
+func (s *parserState) schemaFromStructWithSeen(pkg string, file *fileCtx, st *ast.StructType, seen map[*ast.StructType]bool) *model.Schema {
+	if seen[st] {
+		return &model.Schema{Type: "object", Properties: map[string]*model.Schema{}}
+	}
+	seen[st] = true
+	defer delete(seen, st)
+
 	props := map[string]*model.Schema{}
 	required := make([]string, 0, 2)
+	for _, f := range st.Fields.List {
+		if len(f.Names) != 0 {
+			continue
+		}
+		name, ok := embeddedFieldName(f.Type)
+		if !ok {
+			continue
+		}
+		jsonName, ignore := jsonFieldName(name, f.Tag)
+		if ignore {
+			continue
+		}
+		if hasJSON, ok := tagLookup(f.Tag, "json"); ok && hasJSON != "" {
+			props[jsonName] = s.schemaFromTypeExpr(pkg, file, f.Type)
+			if fieldRequired(f.Tag) {
+				required = append(required, jsonName)
+			}
+			continue
+		}
+		embeddedPkg, embeddedFile, embeddedStruct := s.resolveStructType(pkg, file, f.Type)
+		if embeddedStruct == nil {
+			props[jsonName] = s.schemaFromTypeExpr(pkg, file, f.Type)
+			if fieldRequired(f.Tag) {
+				required = append(required, jsonName)
+			}
+			continue
+		}
+		embedded := s.schemaFromStructWithSeen(embeddedPkg, embeddedFile, embeddedStruct, seen)
+		for name, schema := range embedded.Properties {
+			props[name] = schema
+		}
+		required = append(required, embedded.Required...)
+	}
 	for _, f := range st.Fields.List {
 		if len(f.Names) == 0 {
 			continue
@@ -363,6 +453,40 @@ func (s *parserState) schemaFromStruct(pkg string, file *fileCtx, st *ast.Struct
 		}
 	}
 	return &model.Schema{Type: "object", Properties: props, Required: dedupeSorted(required)}
+}
+
+func mergeEmbeddedSchema(base, embedded *model.Schema) {
+	if base == nil || embedded == nil || embedded.Type != "object" {
+		return
+	}
+	if base.Properties == nil {
+		base.Properties = map[string]*model.Schema{}
+	}
+	for name, schema := range embedded.Properties {
+		base.Properties[name] = schema
+	}
+	base.Required = dedupeSorted(append(base.Required, embedded.Required...))
+}
+
+func embeddedFieldName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.SelectorExpr:
+		return n.Sel.Name, true
+	case *ast.StarExpr:
+		return embeddedFieldName(n.X)
+	default:
+		return "", false
+	}
+}
+
+func hasExplicitJSONName(tag *ast.BasicLit, hasJSON bool) bool {
+	if !hasJSON {
+		return false
+	}
+	name, _ := tagLookup(tag, "json")
+	return name != ""
 }
 
 func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) *model.Schema {
