@@ -247,6 +247,87 @@ type Product struct {
 	assertEmbeddedProductGroupSchema(t, "request body", postSchema)
 }
 
+func TestParseEchoV5GenericQueryParamOrInHelper(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/echov5edge
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"errors"
+	"time"
+
+	"github.com/labstack/echo/v5"
+)
+
+func main() {
+	e := echo.New()
+	e.GET("/billing", billing)
+}
+
+func billing(c echo.Context) error {
+	year, month, start, end, err := parseBillingMonth(&c)
+	if err != nil {
+		return c.JSON(400, map[string]string{"error": err.Error()})
+	}
+	_, _ = start, end
+	return c.JSON(200, map[string]int{"year": year, "month": month})
+}
+
+func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) {
+	now := time.Now().UTC()
+	year, err := echo.QueryParamOr[int](c, "year", now.Year())
+	if err != nil {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("year is invalid")
+	}
+	month, err := echo.QueryParamOr[int](c, "month", int(now.Month()))
+	if err != nil {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("month is invalid")
+	}
+	if year < 2000 || year > 2100 {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("year is invalid")
+	}
+	if month < 1 || month > 12 {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("month is invalid")
+	}
+
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	return year, month, start, end, nil
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	var route *model.Route
+	for i := range ir.Routes {
+		if ir.Routes[i].Method == "GET" && ir.Routes[i].Path == "/billing" {
+			route = &ir.Routes[i]
+			break
+		}
+	}
+	if route == nil {
+		t.Fatalf("missing GET /billing route, got routes: %#v", ir.Routes)
+	}
+
+	paramTypes := map[string]string{}
+	for _, p := range route.Parameters {
+		if p.In == "query" && p.Schema != nil {
+			paramTypes[p.Name] = p.Schema.Type
+		}
+	}
+	for _, name := range []string{"year", "month"} {
+		if paramTypes[name] != "number" {
+			t.Fatalf("expected %s query parameter type number, got %q in params %#v", name, paramTypes[name], route.Parameters)
+		}
+	}
+}
+
 func assertEmbeddedProductGroupSchema(t *testing.T, label string, s *model.Schema) {
 	t.Helper()
 	if s == nil {

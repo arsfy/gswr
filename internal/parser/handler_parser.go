@@ -440,18 +440,18 @@ func parameterCallsInExpr(exprs []ast.Expr) []parameterCall {
 }
 
 func parseParameterCall(call *ast.CallExpr) (parameterCall, bool) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, _, ok := selectorFromCallFun(call.Fun)
 	if !ok || len(call.Args) == 0 {
 		return parameterCall{}, false
 	}
 	if sel.Sel.Name == "GetHeader" {
-		name, ok := stringLiteral(call.Args[0])
+		name, ok := parameterNameArg(call, nil)
 		if !ok || name == "" {
 			return parameterCall{}, false
 		}
 		return parameterCall{name: name, in: "header", required: false}, true
 	}
-	name, ok := stringLiteral(call.Args[0])
+	name, ok := parameterNameArg(call, nil)
 	if !ok || name == "" {
 		return parameterCall{}, false
 	}
@@ -520,18 +520,18 @@ func (s *parserState) collectInputParameterFromHelper(pkg string, file *fileCtx,
 }
 
 func parseParameterCallWithBindings(call *ast.CallExpr, bindings map[string]ast.Expr) (parameterCall, bool) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, _, ok := selectorFromCallFun(call.Fun)
 	if !ok || len(call.Args) == 0 {
 		return parameterCall{}, false
 	}
 	if sel.Sel.Name == "GetHeader" {
-		name, ok := stringLiteral(resolveBindingExpr(call.Args[0], bindings))
+		name, ok := parameterNameArg(call, bindings)
 		if !ok || name == "" {
 			return parameterCall{}, false
 		}
 		return parameterCall{name: name, in: "header", required: false}, true
 	}
-	name, ok := stringLiteral(resolveBindingExpr(call.Args[0], bindings))
+	name, ok := parameterNameArg(call, bindings)
 	if !ok || name == "" {
 		return parameterCall{}, false
 	}
@@ -703,11 +703,11 @@ func (s *parserState) inferTypeFromExprWithResolver(pkg string, file *fileCtx, e
 }
 
 func (s *parserState) collectInputParameter(params map[string]model.Parameter, call *ast.CallExpr) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, _, ok := selectorFromCallFun(call.Fun)
 	if !ok || len(call.Args) == 0 {
 		return
 	}
-	name, ok := stringLiteral(call.Args[0])
+	name, ok := parameterNameArg(call, nil)
 	if !ok || name == "" {
 		return
 	}
@@ -1009,12 +1009,15 @@ func inferTypeFromCall(call *ast.CallExpr) (ast.Expr, bool) {
 	if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "make" && len(call.Args) > 0 {
 		return call.Args[0], true
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+	sel, typeArgs, ok := selectorFromCallFun(call.Fun)
 	if !ok {
 		return nil, false
 	}
 	switch sel.Sel.Name {
 	case "Param", "QueryParam", "QueryParamOr", "FormValue", "FormValueOr", "DefaultQuery", "PostForm", "DefaultPostForm", "Get", "GetHeader":
+		if len(typeArgs) > 0 {
+			return typeArgs[0], true
+		}
 		return ast.NewIdent("string"), true
 	case "Query":
 		if isLikelyRequestContextReceiver(sel.X) {
@@ -1036,6 +1039,42 @@ func inferTypeFromCall(call *ast.CallExpr) (ast.Expr, bool) {
 	default:
 		return nil, false
 	}
+}
+
+func selectorFromCallFun(fun ast.Expr) (*ast.SelectorExpr, []ast.Expr, bool) {
+	switch n := fun.(type) {
+	case *ast.SelectorExpr:
+		return n, nil, true
+	case *ast.IndexExpr:
+		sel, ok := n.X.(*ast.SelectorExpr)
+		if !ok {
+			return nil, nil, false
+		}
+		return sel, []ast.Expr{n.Index}, true
+	case *ast.IndexListExpr:
+		sel, ok := n.X.(*ast.SelectorExpr)
+		if !ok {
+			return nil, nil, false
+		}
+		return sel, n.Indices, true
+	case *ast.ParenExpr:
+		return selectorFromCallFun(n.X)
+	default:
+		return nil, nil, false
+	}
+}
+
+func parameterNameArg(call *ast.CallExpr, bindings map[string]ast.Expr) (string, bool) {
+	if len(call.Args) == 0 {
+		return "", false
+	}
+	if name, ok := stringLiteral(resolveBindingExpr(call.Args[0], bindings)); ok {
+		return name, true
+	}
+	if len(call.Args) > 1 {
+		return stringLiteral(resolveBindingExpr(call.Args[1], bindings))
+	}
+	return "", false
 }
 
 func isLikelyRequestContextReceiver(expr ast.Expr) bool {

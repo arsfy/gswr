@@ -1,9 +1,11 @@
 package user
 
 import (
+	"errors"
 	"example-echo/resp"
 	"example-echo/types"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 )
@@ -107,9 +109,36 @@ func create(c *echo.Context) error {
 	})
 }
 
+func parseMonth(c *echo.Context) (int, int, time.Time, time.Time, error) {
+	now := time.Now().UTC()
+	year, err := echo.QueryParamOr[int](c, "year", now.Year())
+	if err != nil {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("year is invalid")
+	}
+	month, err := echo.QueryParamOr[int](c, "month", int(now.Month()))
+	if err != nil {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("month is invalid")
+	}
+	if year < 2000 || year > 2100 {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("year is invalid")
+	}
+	if month < 1 || month > 12 {
+		return 0, 0, time.Time{}, time.Time{}, errors.New("month is invalid")
+	}
+
+	start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+	end := start.AddDate(0, 1, 0)
+	return year, month, start, end, nil
+}
+
 func createForm(c *echo.Context) error {
 	name := c.FormValue("name")
 	email := c.FormValueOr("email", "default@example.com")
+
+	year, month, _, _, err := parseMonth(c)
+	if err != nil {
+		return c.JSON(400, map[string]string{"code": "invalid_month"})
+	}
 
 	return c.JSON(200, types.Response{
 		Code: "A",
@@ -118,6 +147,8 @@ func createForm(c *echo.Context) error {
 			"email": []string{
 				email,
 			},
+			"year":  year,
+			"month": month,
 		},
 	})
 }
