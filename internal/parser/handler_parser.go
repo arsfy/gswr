@@ -757,6 +757,9 @@ func (s *parserState) inferCallResultTypes(pkg string, file *fileCtx, call *ast.
 	if t, ok := inferTypeFromContextGetCall(call, contextTypes); ok {
 		return []ast.Expr{t}
 	}
+	if t, ok := s.inferTimeCallResultType(pkg, file, call, contextTypes); ok {
+		return []ast.Expr{t}
+	}
 	if t, ok := inferTypeFromCall(call); ok {
 		return []ast.Expr{t}
 	}
@@ -765,6 +768,39 @@ func (s *parserState) inferCallResultTypes(pkg string, file *fileCtx, call *ast.
 		return nil
 	}
 	return flattenFieldListTypes(fm.decl.Type.Results)
+}
+
+func (s *parserState) inferTimeCallResultType(pkg string, file *fileCtx, call *ast.CallExpr, contextTypes map[string]ast.Expr) (ast.Expr, bool) {
+	sel, _, ok := selectorFromCallFun(call.Fun)
+	if !ok {
+		return nil, false
+	}
+	if sel.Sel.Name == "Now" && isSelectorFromImport(file, sel, "time") {
+		return &ast.SelectorExpr{X: sel.X, Sel: ast.NewIdent("Time")}, true
+	}
+	switch sel.Sel.Name {
+	case "UTC", "Local", "Add", "AddDate", "Round", "Truncate":
+		if _, _, t, ok := s.resolveExprTypeWithVars(pkg, file, sel.X, contextTypes); ok && isTimeTypeExpr(file, t) {
+			return t, true
+		}
+		if inner, ok := sel.X.(*ast.CallExpr); ok {
+			return s.inferTimeCallResultType(pkg, file, inner, contextTypes)
+		}
+	}
+	return nil, false
+}
+
+func isSelectorFromImport(file *fileCtx, sel *ast.SelectorExpr, importPath string) bool {
+	if file == nil || sel == nil {
+		return false
+	}
+	alias, ok := sel.X.(*ast.Ident)
+	return ok && file.imports[alias.Name] == importPath
+}
+
+func isTimeTypeExpr(file *fileCtx, expr ast.Expr) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	return ok && sel.Sel.Name == "Time" && isSelectorFromImport(file, sel, "time")
 }
 
 func flattenFieldListTypes(fields *ast.FieldList) []ast.Expr {

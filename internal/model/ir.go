@@ -47,6 +47,8 @@ type Tag struct {
 type Schema struct {
 	Ref                  string
 	Type                 string
+	Format               string
+	Example              any
 	Properties           map[string]*Schema
 	Required             []string
 	Enum                 []any

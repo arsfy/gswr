@@ -98,6 +98,8 @@ type mediaType struct {
 type schemaObject struct {
 	Ref                  string                  `yaml:"$ref,omitempty" json:"$ref,omitempty"`
 	Type                 string                  `yaml:"type,omitempty" json:"type,omitempty"`
+	Format               string                  `yaml:"format,omitempty" json:"format,omitempty"`
+	Example              any                     `yaml:"example,omitempty" json:"example,omitempty"`
 	Properties           map[string]schemaObject `yaml:"properties,omitempty" json:"properties,omitempty"`
 	Required             []string                `yaml:"required,omitempty" json:"required,omitempty"`
 	Enum                 []any                   `yaml:"enum,omitempty" json:"enum,omitempty"`
@@ -261,7 +263,7 @@ func toSchema(s model.Schema) schemaObject {
 	if s.Ref != "" {
 		return schemaObject{Ref: s.Ref}
 	}
-	out := schemaObject{Type: s.Type}
+	out := schemaObject{Type: s.Type, Format: s.Format, Example: s.Example}
 	if len(s.Properties) > 0 {
 		out.Properties = map[string]schemaObject{}
 		keys := make([]string, 0, len(s.Properties))

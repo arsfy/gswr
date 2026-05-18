@@ -158,6 +158,7 @@ func createForm(c *echo.Context) error {
 				"find": find,
 			},
 			"type": typ,
+			"now":  time.Now(),
 		},
 	})
 }

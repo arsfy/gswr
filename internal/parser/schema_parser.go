@@ -55,6 +55,11 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 			return s.schemaFromTypeExpr(pkg, file, t)
 		}
 		return &model.Schema{Type: "object"}
+	case *ast.CallExpr:
+		if t, ok := s.inferTypeFromExprWithResolver(pkg, file, n, varTypes); ok {
+			return s.schemaFromTypeExpr(pkg, file, t)
+		}
+		return &model.Schema{Type: "object"}
 	default:
 		return &model.Schema{Type: "object"}
 	}
@@ -154,7 +159,7 @@ func (s *parserState) schemaFromCompositeLit(pkg string, file *fileCtx, lit *ast
 
 	resolvedPkg, resolvedFile, st := s.resolveStructType(pkg, file, lit.Type)
 	if st != nil {
-		return s.schemaFromStructLiteral(resolvedPkg, resolvedFile, st, lit.Elts, varTypes, bindings)
+		return s.schemaFromStructLiteralWithValueScope(resolvedPkg, resolvedFile, pkg, file, st, lit.Elts, varTypes, bindings)
 	}
 	if keyed := s.schemaFromKeyedObjectLiteral(pkg, file, lit.Elts, varTypes, bindings); keyed != nil {
 		return keyed
@@ -163,12 +168,16 @@ func (s *parserState) schemaFromCompositeLit(pkg string, file *fileCtx, lit *ast
 }
 
 func (s *parserState) schemaFromStructLiteral(pkg string, file *fileCtx, st *ast.StructType, elts []ast.Expr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
-	base := s.schemaFromStruct(pkg, file, st)
+	return s.schemaFromStructLiteralWithValueScope(pkg, file, pkg, file, st, elts, varTypes, bindings)
+}
+
+func (s *parserState) schemaFromStructLiteralWithValueScope(declPkg string, declFile *fileCtx, valuePkg string, valueFile *fileCtx, st *ast.StructType, elts []ast.Expr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
+	base := s.schemaFromStruct(declPkg, declFile, st)
 	if len(elts) == 0 {
 		return base
 	}
 
-	fieldMap := s.structFieldMeta(pkg, file, st)
+	fieldMap := s.structFieldMeta(declPkg, declFile, st)
 	present := map[string]bool{}
 	allKeyed := true
 	for _, elt := range elts {
@@ -199,8 +208,8 @@ func (s *parserState) schemaFromStructLiteral(pkg string, file *fileCtx, st *ast
 			base.Required = removeRequiredField(base.Required, fm.jsonName)
 			continue
 		}
-		literal := s.schemaFromLiteralValueExpr(pkg, file, resolvedVal, varTypes, bindings)
-		declared := s.schemaFromTypeExpr(pkg, file, fm.typ)
+		literal := s.schemaFromLiteralValueExpr(valuePkg, valueFile, resolvedVal, varTypes, bindings)
+		declared := s.schemaFromTypeExpr(declPkg, declFile, fm.typ)
 		if fm.embedded {
 			merged := mergeLiteralSchema(declared, literal)
 			mergeEmbeddedSchema(base, merged)
@@ -525,6 +534,9 @@ func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) 
 		if file != nil {
 			if alias, ok := n.X.(*ast.Ident); ok {
 				if importPath := file.imports[alias.Name]; importPath != "" {
+					if importPath == "time" && n.Sel.Name == "Time" {
+						return timeSchema()
+					}
 					if byName := s.namedTypesByImport[importPath]; byName != nil {
 						if meta := byName[n.Sel.Name]; meta != nil {
 							return s.schemaFromNamedMeta(meta)
@@ -543,6 +555,10 @@ func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) 
 	default:
 		return &model.Schema{Type: "object"}
 	}
+}
+
+func timeSchema() *model.Schema {
+	return &model.Schema{Type: "string", Format: "date-time", Example: "2026-01-02T15:04:05Z"}
 }
 
 func (s *parserState) resolveNamedTypeAnyPkg(typeName string) (*namedTypeMeta, bool) {

@@ -272,9 +272,8 @@ func billing(c echo.Context) error {
 	if err != nil {
 		return c.JSON(400, map[string]string{"error": err.Error()})
 	}
-	_, _ = start, end
 	typ := c.QueryParams()["type"]
-	return c.JSON(200, map[string]any{"year": year, "month": month, "type": typ})
+	return c.JSON(200, map[string]any{"year": year, "month": month, "start": start, "end": end, "now": time.Now(), "type": typ})
 }
 
 func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) {
@@ -340,6 +339,12 @@ func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) 
 	typeSchema := route.Responses[0].Schema.Properties["type"]
 	if typeSchema.Type != "array" || typeSchema.Items == nil || typeSchema.Items.Type != "string" {
 		t.Fatalf("expected type response schema []string, got %#v", typeSchema)
+	}
+	for _, name := range []string{"start", "end", "now"} {
+		schema := route.Responses[0].Schema.Properties[name]
+		if schema == nil || schema.Type != "string" || schema.Format != "date-time" || schema.Example != "2026-01-02T15:04:05Z" {
+			t.Fatalf("expected %s response schema date-time string for time.Time, got %#v", name, schema)
+		}
 	}
 }
 

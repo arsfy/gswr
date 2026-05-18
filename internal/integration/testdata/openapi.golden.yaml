@@ -343,6 +343,10 @@ paths:
                                                 type: number
                                             name:
                                                 type: string
+                                            now:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
                                             type:
                                                 type: array
                                                 items:
@@ -354,6 +358,7 @@ paths:
                                             - find
                                             - month
                                             - name
+                                            - now
                                             - type
                                             - year
                 "400":
