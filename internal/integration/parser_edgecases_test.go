@@ -273,7 +273,8 @@ func billing(c echo.Context) error {
 		return c.JSON(400, map[string]string{"error": err.Error()})
 	}
 	_, _ = start, end
-	return c.JSON(200, map[string]int{"year": year, "month": month})
+	typ := c.QueryParams()["type"]
+	return c.JSON(200, map[string]any{"year": year, "month": month, "type": typ})
 }
 
 func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) {
@@ -316,15 +317,29 @@ func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) 
 	}
 
 	paramTypes := map[string]string{}
+	var typeParam *model.Parameter
 	for _, p := range route.Parameters {
 		if p.In == "query" && p.Schema != nil {
 			paramTypes[p.Name] = p.Schema.Type
+		}
+		if p.In == "query" && p.Name == "type" {
+			typeParam = &p
 		}
 	}
 	for _, name := range []string{"year", "month"} {
 		if paramTypes[name] != "number" {
 			t.Fatalf("expected %s query parameter type number, got %q in params %#v", name, paramTypes[name], route.Parameters)
 		}
+	}
+	if typeParam == nil || typeParam.Schema == nil || typeParam.Schema.Type != "array" || typeParam.Schema.Items == nil || typeParam.Schema.Items.Type != "string" {
+		t.Fatalf("expected type query parameter schema []string, got %#v in params %#v", typeParam, route.Parameters)
+	}
+	if len(route.Responses) == 0 || route.Responses[0].Schema == nil || route.Responses[0].Schema.Properties["type"] == nil {
+		t.Fatalf("missing type response schema: %#v", route.Responses)
+	}
+	typeSchema := route.Responses[0].Schema.Properties["type"]
+	if typeSchema.Type != "array" || typeSchema.Items == nil || typeSchema.Items.Type != "string" {
+		t.Fatalf("expected type response schema []string, got %#v", typeSchema)
 	}
 }
 

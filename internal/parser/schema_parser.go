@@ -50,6 +50,11 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 			return resolved
 		}
 		return &model.Schema{Type: "object"}
+	case *ast.IndexExpr:
+		if t, ok := inferTypeFromQueryParamsIndex(n); ok {
+			return s.schemaFromTypeExpr(pkg, file, t)
+		}
+		return &model.Schema{Type: "object"}
 	default:
 		return &model.Schema{Type: "object"}
 	}

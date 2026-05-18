@@ -2,6 +2,7 @@ package user
 
 import (
 	"errors"
+	"example-echo/other"
 	"example-echo/resp"
 	"example-echo/types"
 	"net/http"
@@ -140,6 +141,10 @@ func createForm(c *echo.Context) error {
 		return c.JSON(400, map[string]string{"code": "invalid_month"})
 	}
 
+	typ := c.QueryParams()["type"]
+
+	_, _, find, _ := other.Find(1)
+
 	return c.JSON(200, types.Response{
 		Code: "A",
 		Data: map[string]any{
@@ -149,6 +154,10 @@ func createForm(c *echo.Context) error {
 			},
 			"year":  year,
 			"month": month,
+			"find": map[string]interface{}{
+				"find": find,
+			},
+			"type": typ,
 		},
 	})
 }

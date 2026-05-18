@@ -295,10 +295,24 @@ paths:
                   in: query
                   schema:
                     type: string
+                - name: month
+                  in: query
+                  schema:
+                    type: number
                 - name: name
                   in: query
                   schema:
                     type: string
+                - name: type
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        type: string
+                - name: year
+                  in: query
+                  schema:
+                    type: number
             responses:
                 "200":
                     description: OK
@@ -318,11 +332,43 @@ paths:
                                                 type: array
                                                 items:
                                                     type: string
+                                            find:
+                                                type: object
+                                                properties:
+                                                    find:
+                                                        $ref: '#/components/schemas/other_FindResponse'
+                                                required:
+                                                    - find
+                                            month:
+                                                type: object
                                             name:
                                                 type: string
+                                            type:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            year:
+                                                type: number
                                         required:
                                             - email
+                                            - find
+                                            - month
                                             - name
+                                            - type
+                                            - year
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - invalid_month
+                                required:
+                                    - code
     /api/v1/user/list:
         get:
             operationId: list
@@ -451,6 +497,13 @@ paths:
                                     - code
 components:
     schemas:
+        other_FindResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
         user_Label:
             type: object
             properties:

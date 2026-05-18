@@ -426,12 +426,15 @@ func parameterCallsInExpr(exprs []ast.Expr) []parameterCall {
 	out := make([]parameterCall, 0, 2)
 	for _, expr := range exprs {
 		ast.Inspect(expr, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			if p, ok := parseParameterCall(call); ok {
-				out = append(out, p)
+			switch x := n.(type) {
+			case *ast.IndexExpr:
+				if p, ok := parseParameterIndex(x); ok {
+					out = append(out, p)
+				}
+			case *ast.CallExpr:
+				if p, ok := parseParameterCall(x); ok {
+					out = append(out, p)
+				}
 			}
 			return true
 		})
@@ -472,6 +475,29 @@ func parseParameterCall(call *ast.CallExpr) (parameterCall, bool) {
 	return parameterCall{}, false
 }
 
+func parseParameterIndex(index *ast.IndexExpr) (parameterCall, bool) {
+	return parseParameterIndexWithBindings(index, nil)
+}
+
+func parseParameterIndexWithBindings(index *ast.IndexExpr, bindings map[string]ast.Expr) (parameterCall, bool) {
+	call, ok := index.X.(*ast.CallExpr)
+	if !ok {
+		return parameterCall{}, false
+	}
+	sel, _, ok := selectorFromCallFun(call.Fun)
+	if !ok || sel.Sel.Name != "QueryParams" || len(call.Args) != 0 {
+		return parameterCall{}, false
+	}
+	if !isLikelyRequestContextReceiver(resolveBindingExpr(sel.X, bindings)) {
+		return parameterCall{}, false
+	}
+	name, ok := stringLiteral(resolveBindingExpr(index.Index, bindings))
+	if !ok || name == "" {
+		return parameterCall{}, false
+	}
+	return parameterCall{name: name, in: "query", required: false}, true
+}
+
 func (s *parserState) collectInputParameterFromHelper(pkg string, file *fileCtx, params map[string]model.Parameter, call *ast.CallExpr, depth int, bindings map[string]ast.Expr) {
 	if depth > 4 {
 		return
@@ -502,19 +528,27 @@ func (s *parserState) collectInputParameterFromHelper(pkg string, file *fileCtx,
 		if _, ok := n.(*ast.FuncLit); ok {
 			return false
 		}
-		innerCall, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
+		switch x := n.(type) {
+		case *ast.IndexExpr:
+			if p, ok := parseParameterIndexWithBindings(x, localBindings); ok {
+				mergeParameter(params, model.Parameter{
+					Name:     p.name,
+					In:       p.in,
+					Required: p.required,
+					Schema:   &model.Schema{Type: "array", Items: &model.Schema{Type: "string"}},
+				})
+			}
+		case *ast.CallExpr:
+			if p, ok := parseParameterCallWithBindings(x, localBindings); ok {
+				mergeParameter(params, model.Parameter{
+					Name:     p.name,
+					In:       p.in,
+					Required: p.required,
+					Schema:   &model.Schema{Type: "string"},
+				})
+			}
+			s.collectInputParameterFromHelper(fm.pkg, fm.file, params, x, depth+1, localBindings)
 		}
-		if p, ok := parseParameterCallWithBindings(innerCall, localBindings); ok {
-			mergeParameter(params, model.Parameter{
-				Name:     p.name,
-				In:       p.in,
-				Required: p.required,
-				Schema:   &model.Schema{Type: "string"},
-			})
-		}
-		s.collectInputParameterFromHelper(fm.pkg, fm.file, params, innerCall, depth+1, localBindings)
 		return true
 	})
 }
@@ -697,6 +731,11 @@ func (s *parserState) inferTypeFromExprWithResolver(pkg string, file *fileCtx, e
 	case *ast.SelectorExpr:
 		_, _, t, ok := s.resolveExprTypeWithVars(pkg, file, n, contextTypes)
 		return t, ok
+	case *ast.IndexExpr:
+		if t, ok := inferTypeFromQueryParamsIndex(n); ok {
+			return t, true
+		}
+		return nil, false
 	default:
 		return inferTypeFromExprWithContext(expr, contextTypes)
 	}
@@ -962,8 +1001,19 @@ func inferTypeFromExprWithContext(expr ast.Expr, contextTypes map[string]ast.Exp
 		return inferTypeFromCall(n)
 	case *ast.TypeAssertExpr:
 		return n.Type, true
+	case *ast.IndexExpr:
+		if t, ok := inferTypeFromQueryParamsIndex(n); ok {
+			return t, true
+		}
 	}
 	return nil, false
+}
+
+func inferTypeFromQueryParamsIndex(index *ast.IndexExpr) (ast.Expr, bool) {
+	if _, ok := parseParameterIndex(index); !ok {
+		return nil, false
+	}
+	return &ast.ArrayType{Elt: ast.NewIdent("string")}, true
 }
 
 func inferTypeFromExpr(expr ast.Expr) (ast.Expr, bool) {
