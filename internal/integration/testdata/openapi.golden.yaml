@@ -340,7 +340,7 @@ paths:
                                                 required:
                                                     - find
                                             month:
-                                                type: object
+                                                type: number
                                             name:
                                                 type: string
                                             type:
@@ -501,7 +501,7 @@ components:
             type: object
             properties:
                 id:
-                    type: string
+                    type: number
                 name:
                     type: string
         user_Label:

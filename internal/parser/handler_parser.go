@@ -638,15 +638,7 @@ func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.Blo
 			}
 		case *ast.ValueSpec:
 			if x.Type == nil {
-				for i, name := range x.Names {
-					if i >= len(x.Values) {
-						continue
-					}
-					knownTypes := mergeTypeMaps(contextTypes, varTypes)
-					if t, ok := s.inferTypeFromExprWithResolver(pkg, file, x.Values[i], knownTypes); ok {
-						varTypes[name.Name] = resolveLocalTypeExpr(t, localTypes)
-					}
-				}
+				s.collectValueSpecTypes(pkg, file, x, contextTypes, varTypes, localTypes)
 			} else {
 				for _, name := range x.Names {
 					varTypes[name.Name] = resolveLocalTypeExpr(x.Type, localTypes)
@@ -658,24 +650,70 @@ func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.Blo
 				}
 			}
 		case *ast.AssignStmt:
-			for i := range x.Lhs {
-				if i >= len(x.Rhs) {
-					break
-				}
-				lhs, ok := x.Lhs[i].(*ast.Ident)
-				if !ok {
-					continue
-				}
-				knownTypes := mergeTypeMaps(contextTypes, varTypes)
-				if t, ok := s.inferTypeFromExprWithResolver(pkg, file, x.Rhs[i], knownTypes); ok {
-					varTypes[lhs.Name] = resolveLocalTypeExpr(t, localTypes)
-				}
-				varValues[lhs.Name] = x.Rhs[i]
-			}
+			s.collectAssignTypes(pkg, file, x, contextTypes, varTypes, varValues, localTypes)
 		}
 		return true
 	})
 	return varTypes, varValues
+}
+
+func (s *parserState) collectValueSpecTypes(pkg string, file *fileCtx, st *ast.ValueSpec, contextTypes, varTypes map[string]ast.Expr, localTypes map[string]ast.Expr) {
+	knownTypes := mergeTypeMaps(contextTypes, varTypes)
+	if len(st.Values) == 1 && len(st.Names) > 1 {
+		if call, ok := st.Values[0].(*ast.CallExpr); ok {
+			resultTypes := s.inferCallResultTypes(pkg, file, call, knownTypes)
+			for i, name := range st.Names {
+				if name.Name == "_" || i >= len(resultTypes) {
+					continue
+				}
+				varTypes[name.Name] = resolveLocalTypeExpr(resultTypes[i], localTypes)
+			}
+			return
+		}
+	}
+
+	for i, name := range st.Names {
+		if name.Name == "_" || i >= len(st.Values) {
+			continue
+		}
+		if t, ok := s.inferTypeFromExprWithResolver(pkg, file, st.Values[i], knownTypes); ok {
+			varTypes[name.Name] = resolveLocalTypeExpr(t, localTypes)
+		}
+	}
+}
+
+func (s *parserState) collectAssignTypes(pkg string, file *fileCtx, st *ast.AssignStmt, contextTypes, varTypes, varValues map[string]ast.Expr, localTypes map[string]ast.Expr) {
+	knownTypes := mergeTypeMaps(contextTypes, varTypes)
+	if len(st.Rhs) == 1 && len(st.Lhs) > 1 {
+		if call, ok := st.Rhs[0].(*ast.CallExpr); ok {
+			resultTypes := s.inferCallResultTypes(pkg, file, call, knownTypes)
+			for i, lhsExpr := range st.Lhs {
+				lhs, ok := lhsExpr.(*ast.Ident)
+				if !ok || lhs.Name == "_" {
+					continue
+				}
+				if i < len(resultTypes) {
+					varTypes[lhs.Name] = resolveLocalTypeExpr(resultTypes[i], localTypes)
+				}
+				varValues[lhs.Name] = st.Rhs[0]
+			}
+			return
+		}
+	}
+
+	for i := range st.Lhs {
+		if i >= len(st.Rhs) {
+			break
+		}
+		lhs, ok := st.Lhs[i].(*ast.Ident)
+		if !ok || lhs.Name == "_" {
+			continue
+		}
+		if t, ok := s.inferTypeFromExprWithResolver(pkg, file, st.Rhs[i], knownTypes); ok {
+			varTypes[lhs.Name] = resolveLocalTypeExpr(t, localTypes)
+		}
+		varValues[lhs.Name] = st.Rhs[i]
+	}
 }
 
 func resolveLocalTypeExpr(t ast.Expr, localTypes map[string]ast.Expr) ast.Expr {
@@ -715,17 +753,45 @@ func mergeTypeMaps(a, b map[string]ast.Expr) map[string]ast.Expr {
 	return out
 }
 
+func (s *parserState) inferCallResultTypes(pkg string, file *fileCtx, call *ast.CallExpr, contextTypes map[string]ast.Expr) []ast.Expr {
+	if t, ok := inferTypeFromContextGetCall(call, contextTypes); ok {
+		return []ast.Expr{t}
+	}
+	if t, ok := inferTypeFromCall(call); ok {
+		return []ast.Expr{t}
+	}
+	fm := s.resolveCalleeByPkg(pkg, file, call.Fun)
+	if fm == nil || fm.decl == nil || fm.decl.Type == nil || fm.decl.Type.Results == nil {
+		return nil
+	}
+	return flattenFieldListTypes(fm.decl.Type.Results)
+}
+
+func flattenFieldListTypes(fields *ast.FieldList) []ast.Expr {
+	if fields == nil {
+		return nil
+	}
+	out := make([]ast.Expr, 0, len(fields.List))
+	for _, field := range fields.List {
+		if field == nil || field.Type == nil {
+			continue
+		}
+		count := 1
+		if len(field.Names) > 0 {
+			count = len(field.Names)
+		}
+		for i := 0; i < count; i++ {
+			out = append(out, field.Type)
+		}
+	}
+	return out
+}
+
 func (s *parserState) inferTypeFromExprWithResolver(pkg string, file *fileCtx, expr ast.Expr, contextTypes map[string]ast.Expr) (ast.Expr, bool) {
 	switch n := expr.(type) {
 	case *ast.CallExpr:
-		if t, ok := inferTypeFromContextGetCall(n, contextTypes); ok {
-			return t, true
-		}
-		if t, ok := inferTypeFromCall(n); ok {
-			return t, true
-		}
-		if fm := s.resolveCalleeByPkg(pkg, file, n.Fun); fm != nil && fm.decl.Type.Results != nil && len(fm.decl.Type.Results.List) > 0 {
-			return fm.decl.Type.Results.List[0].Type, true
+		if resultTypes := s.inferCallResultTypes(pkg, file, n, contextTypes); len(resultTypes) > 0 {
+			return resultTypes[0], true
 		}
 		return nil, false
 	case *ast.SelectorExpr:

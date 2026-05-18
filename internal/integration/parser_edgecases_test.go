@@ -343,6 +343,65 @@ func parseBillingMonth(c *echo.Context) (int, int, time.Time, time.Time, error) 
 	}
 }
 
+func TestParseMultiReturnAssignedResponseType(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/multireturnedge
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import "github.com/labstack/echo/v5"
+
+type FindResponse struct {
+	ID   int64  `+"`json:\"id\"`"+`
+	Name string `+"`json:\"name\"`"+`
+}
+
+func main() {
+	e := echo.New()
+	e.GET("/find", findHandler)
+}
+
+func lookup(t int) (int, []FindResponse, FindResponse, error) {
+	return 1, nil, FindResponse{ID: int64(t), Name: "ok"}, nil
+}
+
+func findHandler(c echo.Context) error {
+	_, _, find, _ := lookup(1)
+	return c.JSON(200, map[string]any{
+		"find": map[string]interface{}{
+			"find": find,
+		},
+	})
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	var route *model.Route
+	for i := range ir.Routes {
+		if ir.Routes[i].Method == "GET" && ir.Routes[i].Path == "/find" {
+			route = &ir.Routes[i]
+			break
+		}
+	}
+	if route == nil || len(route.Responses) == 0 || route.Responses[0].Schema == nil {
+		t.Fatalf("missing GET /find response schema, got route %#v", route)
+	}
+	outer := route.Responses[0].Schema.Properties["find"]
+	if outer == nil || outer.Properties["find"] == nil {
+		t.Fatalf("missing nested find schema: %#v", route.Responses[0].Schema)
+	}
+	inner := outer.Properties["find"]
+	if inner.Ref == "" {
+		t.Fatalf("expected nested find schema to resolve to FindResponse ref, got %#v", inner)
+	}
+}
+
 func assertEmbeddedProductGroupSchema(t *testing.T, label string, s *model.Schema) {
 	t.Helper()
 	if s == nil {
