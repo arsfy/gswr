@@ -1,9 +1,18 @@
 <script lang="ts">
   import { ClipboardCheck, ClipboardCopy, Play, Shield } from '@lucide/svelte';
   import type { OpenApiOperation, OpenApiSpec, OpenApiParameter, OpenApiResponse } from '../openapi';
-  import { methodColor, displaySummary, getServerUrl } from '../openapi';
+  import {
+    methodColor,
+    displaySummary,
+    getServerUrl,
+    getJsonSchema,
+    joinServerUrl,
+    resolveSchemaRef,
+  } from '../openapi';
   import SchemaView from './SchemaView.svelte';
   import RequestEditor from './RequestEditor.svelte';
+  import JsonPreview from './JsonPreview.svelte';
+  import PathText from './PathText.svelte';
 
   interface Props {
     operation: OpenApiOperation;
@@ -18,13 +27,16 @@
   let activeResponseTab = $state('200');
 
   const serverUrl = $derived(getServerUrl(spec));
-  const fullUrl = $derived(`${serverUrl}${operation.path}`);
+  const fullUrl = $derived(joinServerUrl(serverUrl, operation.path));
   const pathParams = $derived((operation.parameters ?? []).filter((p: OpenApiParameter) => p.in === 'path'));
   const queryParams = $derived((operation.parameters ?? []).filter((p: OpenApiParameter) => p.in === 'query'));
   const headerParams = $derived((operation.parameters ?? []).filter((p: OpenApiParameter) => p.in === 'header'));
   const responseCodes = $derived(Object.keys(operation.responses ?? {}).sort());
   const activeResponse = $derived(operation.responses?.[activeResponseTab]);
   const activeResponseSchema = $derived(responseSchema(activeResponseTab));
+  const activeResponseExample = $derived(
+    activeResponseSchema ? JSON.stringify(exampleValue(activeResponseSchema), null, 2) : null,
+  );
 
   function copyUrl() {
     void navigator.clipboard.writeText(fullUrl).then(() => {
@@ -34,48 +46,46 @@
   }
 
   function bodySchema(operation: OpenApiOperation): Record<string, unknown> | null {
-    const content = operation.requestBody?.content ?? {};
-    const json = content['application/json'];
-    return json?.schema ?? null;
+    return getJsonSchema(operation.requestBody?.content);
   }
 
   function responseSchema(code: string): Record<string, unknown> | null {
     const response = operation.responses?.[code];
     if (!response) return null;
-    const content = response.content ?? {};
-    return content['application/json']?.schema ?? null;
+    return getJsonSchema(response.content);
   }
 
-  function exampleValue(schema: Record<string, unknown> | null): string {
-    if (!schema) return '{}';
-    if (schema.$ref) {
-      const name = String(schema.$ref).split('/').pop();
-      const def = spec.components?.schemas?.[name ?? ''];
-      if (def) return JSON.stringify(exampleValue(def), null, 2);
-      return '{}';
+  function exampleValue(schema: Record<string, unknown> | null, seen = new Set<string>()): unknown {
+    if (!schema) return {};
+    if (typeof schema.$ref === 'string') {
+      if (seen.has(schema.$ref)) return {};
+      const nextSeen = new Set(seen).add(schema.$ref);
+      return exampleValue(resolveSchemaRef(schema, spec.components?.schemas), nextSeen);
     }
-    if (schema.type === 'object') {
+    if (schema.example !== undefined) return schema.example;
+    if (schema.default !== undefined) return schema.default;
+    if (schema.type === 'object' || schema.properties) {
       const obj: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(schema.properties ?? {})) {
-        obj[key] = exampleValue(value as Record<string, unknown>);
+        obj[key] = exampleValue(value as Record<string, unknown>, seen);
       }
-      return JSON.stringify(obj, null, 2);
+      return obj;
     }
     if (schema.type === 'array') {
-      return JSON.stringify([exampleValue(schema.items as Record<string, unknown>)], null, 2);
+      return [exampleValue(schema.items as Record<string, unknown>, seen)];
     }
     if (schema.type === 'string') {
-      if (schema.enum) return JSON.stringify((schema.enum as unknown[])[0] ?? 'string');
-      return '"string"';
+      if (schema.enum) return (schema.enum as unknown[])[0] ?? 'string';
+      return 'string';
     }
-    if (schema.type === 'integer' || schema.type === 'number') return '0';
-    if (schema.type === 'boolean') return 'true';
-    return '{}';
+    if (schema.type === 'integer' || schema.type === 'number') return 0;
+    if (schema.type === 'boolean') return true;
+    return {};
   }
 
   $effect(() => {
     const schema = bodySchema(operation);
-    requestBody = exampleValue(schema);
+    requestBody = JSON.stringify(exampleValue(schema), null, 2);
   });
 
   function curlCommand(): string {
@@ -122,7 +132,7 @@
     <div class="mt-4 flex items-stretch gap-2">
       <div class="flex-1 font-mono text-sm bg-surface-inset border border-border rounded-lg px-3 py-2 break-all text-text-heading"
       >
-        {fullUrl}
+        <PathText value={fullUrl} />
       </div>
       <button
         onclick={copyUrl}
@@ -260,7 +270,7 @@
 
       {#if schema}
         <div class="mb-4">
-          <SchemaView {schema} />
+          <SchemaView {schema} schemas={spec.components?.schemas} />
         </div>
       {/if}
 
@@ -275,7 +285,7 @@
             Try
           </button>
         </div>
-        <div class="h-[220px] p-2 bg-surface">
+        <div class="h-55 p-2 bg-surface">
           <RequestEditor bind:value={requestBody} />
         </div>
       </div>
@@ -302,7 +312,14 @@
           {#if activeResponse}
             <p class="text-text mb-4">{activeResponse.description}</p>
             {#if activeResponseSchema}
-              <SchemaView schema={activeResponseSchema} />
+              <div class="rounded-lg border border-border overflow-hidden mb-4">
+                <div class="px-3 py-2 border-b border-border bg-surface-inset text-xs font-medium text-text-muted">
+                  application/json
+                </div>
+                <JsonPreview value={activeResponseExample ?? ''} />
+              </div>
+              <div class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">Schema</div>
+              <SchemaView schema={activeResponseSchema} schemas={spec.components?.schemas} />
             {:else}
               <div class="font-mono text-sm text-text-muted">No schema defined.</div>
             {/if}

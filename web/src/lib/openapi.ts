@@ -99,8 +99,9 @@ export function groupOperationsByTag(spec: OpenApiSpec): GroupedOperations[] {
     for (const operation of Object.values(methods)) {
       const tags = operation.tags?.length ? operation.tags : ['untagged'];
       for (const tag of tags) {
-        if (!map.has(tag)) map.set(tag, []);
-        map.get(tag)!.push(operation);
+        const operations = map.get(tag) ?? [];
+        operations.push(operation);
+        map.set(tag, operations);
       }
     }
   }
@@ -134,6 +135,29 @@ export function operationSlug(operation: OpenApiOperation): string {
   return `${operation.method}-${operation.path}`;
 }
 
+export function operationRoute(operation: OpenApiOperation): string {
+  return `#/${operation.method}${operation.path}`;
+}
+
+export function operationFromRoute(
+  spec: OpenApiSpec,
+  hash: string,
+): OpenApiOperation | null {
+  let route: string;
+  try {
+    route = decodeURI(hash);
+  } catch {
+    return null;
+  }
+
+  const match = /^#\/(get|post|put|patch|delete|head|options|trace)(\/.*)$/.exec(route);
+  if (!match) return null;
+
+  const method = match[1] as HttpMethod;
+  const path = match[2];
+  return spec.paths[path]?.[method] ?? null;
+}
+
 export async function loadOpenApi(url = '/openapi.yaml'): Promise<OpenApiSpec> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to load OpenAPI spec: ${res.status} ${res.statusText}`);
@@ -144,6 +168,37 @@ export async function loadOpenApi(url = '/openapi.yaml'): Promise<OpenApiSpec> {
 
 export function getServerUrl(spec: OpenApiSpec): string {
   return spec.servers?.[0]?.url ?? '';
+}
+
+export function joinServerUrl(serverUrl: string, operationPath: string): string {
+  if (!serverUrl) return operationPath;
+  if (!operationPath) return serverUrl;
+
+  return `${serverUrl.replace(/\/+$/, '')}/${operationPath.replace(/^\/+/, '')}`;
+}
+
+export function getJsonSchema(
+  content: Record<string, { schema?: Record<string, unknown> }> | undefined,
+): Record<string, unknown> | null {
+  if (!content) return null;
+
+  const jsonMediaType = Object.keys(content).find((mediaType) => {
+    const normalized = mediaType.split(';', 1)[0].trim().toLowerCase();
+    return normalized === 'application/json' || normalized.endsWith('+json');
+  });
+
+  return jsonMediaType ? (content[jsonMediaType]?.schema ?? null) : null;
+}
+
+export function resolveSchemaRef(
+  schema: Record<string, unknown>,
+  schemas: Record<string, Record<string, unknown>> = {},
+): Record<string, unknown> {
+  if (typeof schema.$ref !== 'string') return schema;
+
+  const name = schema.$ref.split('/').pop();
+  const referenced = name ? schemas[name] : undefined;
+  return referenced ? { ...referenced, ...schema, $ref: undefined } : schema;
 }
 
 export function displayPath(operation: OpenApiOperation): string {

@@ -3,6 +3,7 @@
   import { Collapsible } from 'bits-ui';
   import type { GroupedOperations, OpenApiOperation } from '../openapi';
   import { methodColor, operationSlug } from '../openapi';
+  import PathText from './PathText.svelte';
 
   interface Props {
     groups: GroupedOperations[];
@@ -52,10 +53,6 @@
     }
   });
 
-  function shortPath(path: string): string {
-    if (path.length <= 42) return path;
-    return path.slice(0, 19) + '…' + path.slice(-22);
-  }
 </script>
 
 <div class="flex flex-col h-full">
@@ -106,7 +103,7 @@
                 {op.method.toUpperCase()}
               </span>
               <span class="truncate font-mono text-xs text-text-heading" title={op.path}
-              >{shortPath(op.path)}</span>
+              ><PathText value={op.path} /></span>
             </button>
           {/each}
         </Collapsible.Content>

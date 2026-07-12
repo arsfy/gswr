@@ -1,14 +1,15 @@
 <script lang="ts">
   import SchemaView from './SchemaView.svelte';
+  import { resolveSchemaRef } from '../openapi';
 
   interface Props {
     schema: Record<string, unknown>;
-    required?: string[];
+    schemas?: Record<string, Record<string, unknown>>;
     name?: string;
     depth?: number;
   }
 
-  let { schema, required = [], name, depth = 0 }: Props = $props();
+  let { schema, schemas = {}, name, depth = 0 }: Props = $props();
 
   function isObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -32,29 +33,41 @@
     return ref.split('/').pop() ?? ref;
   }
 
+  const resolvedSchema = $derived(resolveSchemaRef(schema, schemas));
+  const requiredFields = $derived(
+    Array.isArray(resolvedSchema.required) ? (resolvedSchema.required as string[]) : [],
+  );
+
   const entries = $derived(
-    Object.entries(schema.properties ?? {})
-      .sort(([, a], [, b]) => {
-        const ar = required.includes(a as unknown as string) ? 0 : 1;
-        const br = required.includes(b as unknown as string) ? 0 : 1;
+    Object.entries(resolvedSchema.properties ?? {})
+      .sort(([a], [b]) => {
+        const ar = requiredFields.includes(a) ? 0 : 1;
+        const br = requiredFields.includes(b) ? 0 : 1;
         return ar - br;
       })
   );
 
   const children = $derived.by(() => {
-    if (schema.type === 'object' && entries.length > 0) {
+    if ((resolvedSchema.type === 'object' || resolvedSchema.properties) && entries.length > 0) {
       return entries.map(([key, value]) => ({ key, value: value as Record<string, unknown> }));
     }
-    if (schema.type === 'array' && isObject(schema.items)) {
-      return [{ key: 'items', value: schema.items }];
+    if (resolvedSchema.type === 'array' && isObject(resolvedSchema.items)) {
+      return [{ key: 'items', value: resolvedSchema.items }];
     }
     return [];
   });
+
+  function hasChildren(value: Record<string, unknown>): boolean {
+    const resolved = resolveSchemaRef(value, schemas);
+    return Boolean(
+      value.$ref || resolved.type === 'object' || resolved.type === 'array' || resolved.properties,
+    );
+  }
 </script>
 
-{#if schema.$ref}
+{#if schema.$ref && depth >= 8}
   <span class="font-mono text-sm text-accent">{formatRef(String(schema.$ref))}</span>
-{:else if schema.type === 'object' && children.length > 0}
+{:else if (resolvedSchema.type === 'object' || resolvedSchema.properties) && children.length > 0}
   <div class="font-mono text-sm" style="margin-left: {depth > 0 ? 16 : 0}px">
     {#if name}
       <div class="mb-1 text-text-heading">{name}</div>
@@ -62,10 +75,10 @@
     <div class="rounded-lg border border-border bg-surface p-3">
       {#each children as { key, value }}
         <div class="py-1.5 border-b border-border last:border-b-0">
-          <div class="flex items-start gap-2 flex-wrap">
-            <span class="text-text-heading font-medium">{key}</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-text-heading text-xs font-medium">{key}</span>
             <span class="text-text-muted text-xs uppercase tracking-wide">{typeLabel(value)}</span>
-            {#if required.includes(key)}
+            {#if requiredFields.includes(key)}
               <span class="text-delete text-xs">required</span>
             {/if}
           </div>
@@ -80,27 +93,27 @@
               {/each}
             </div>
           {/if}
-          {#if (isObject(value) && (value.type === 'object' || value.type === 'array'))}
+          {#if isObject(value) && hasChildren(value)}
             <div class="mt-2">
-              <SchemaView schema={value} required={Array.isArray(value.required) ? value.required as string[] : []} depth={depth + 1} />
+              <SchemaView schema={value} {schemas} depth={depth + 1} />
             </div>
           {/if}
         </div>
       {/each}
     </div>
   </div>
-{:else if schema.type === 'array' && children.length > 0}
+{:else if resolvedSchema.type === 'array' && children.length > 0}
   <div class="font-mono text-sm" style="margin-left: {depth > 0 ? 16 : 0}px">
     <div class="text-text-muted mb-1">array of:</div>
-    <SchemaView schema={schema.items as Record<string, unknown>} depth={depth + 1} />
+    <SchemaView schema={resolvedSchema.items as Record<string, unknown>} {schemas} depth={depth + 1} />
   </div>
 {:else}
   <div class="font-mono text-sm text-text-muted">
     {#if name}
       <span class="text-text-heading">{name}</span>
-      <span class="ml-2">{typeLabel(schema)}</span>
+      <span class="ml-2">{typeLabel(resolvedSchema)}</span>
     {:else}
-      {typeLabel(schema)}
+      {typeLabel(resolvedSchema)}
     {/if}
   </div>
 {/if}
