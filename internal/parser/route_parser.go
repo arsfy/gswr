@@ -33,6 +33,7 @@ func (s *parserState) walkStmts(owner *funcMeta, stmts []ast.Stmt, env map[strin
 		switch n := st.(type) {
 		case *ast.AssignStmt:
 			s.handleAssign(owner, n, env)
+			s.tryHTTPServerHandlerAssign(owner, n)
 		case *ast.ExprStmt:
 			s.handleCallExpr(owner, n.X, env)
 		case *ast.BlockStmt:
@@ -47,6 +48,68 @@ func (s *parserState) walkStmts(owner *funcMeta, stmts []ast.Stmt, env map[strin
 			}
 		}
 	}
+}
+
+func (s *parserState) tryHTTPServerHandlerAssign(owner *funcMeta, st *ast.AssignStmt) {
+	for _, rhs := range st.Rhs {
+		composite, ok := httpServerComposite(owner.file, rhs)
+		if !ok {
+			continue
+		}
+		for _, elt := range composite.Elts {
+			field, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			name, ok := field.Key.(*ast.Ident)
+			if !ok || name.Name != "Handler" {
+				continue
+			}
+			call, ok := field.Value.(*ast.CallExpr)
+			if !ok {
+				continue
+			}
+			s.tryHTTPHandlerFactoryCall(owner, call)
+		}
+	}
+}
+
+func httpServerComposite(file *fileCtx, expr ast.Expr) (*ast.CompositeLit, bool) {
+	if unary, ok := expr.(*ast.UnaryExpr); ok && unary.Op.String() == "&" {
+		expr = unary.X
+	}
+	composite, ok := expr.(*ast.CompositeLit)
+	if !ok {
+		return nil, false
+	}
+	sel, ok := composite.Type.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Server" {
+		return nil, false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	if !ok || file == nil || file.imports[pkg.Name] != "net/http" {
+		return nil, false
+	}
+	return composite, true
+}
+
+func (s *parserState) tryHTTPHandlerFactoryCall(owner *funcMeta, call *ast.CallExpr) {
+	callee := s.resolveCallee(owner, call.Fun)
+	if callee == nil || callee.decl == nil || callee.decl.Body == nil || callee.decl.Type.Results == nil {
+		return
+	}
+	returnsRouter := false
+	for _, result := range callee.decl.Type.Results.List {
+		if isEchoRouterType(result.Type) {
+			returnsRouter = true
+			break
+		}
+	}
+	if !returnsRouter || !s.looksLikeRouteSetup(callee) {
+		return
+	}
+	key := fmt.Sprintf("%s.%s@http-handler", callee.pkg, callee.name)
+	s.parseFunction(callee, map[string]groupState{}, key)
 }
 
 func (s *parserState) handleElse(owner *funcMeta, st ast.Stmt, env map[string]groupState) {

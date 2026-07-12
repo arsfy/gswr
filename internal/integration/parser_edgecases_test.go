@@ -101,6 +101,199 @@ func SelectorHandler(c echo.Context) error {
 	}
 }
 
+func TestParseParameterizedRouterFactoryNestedInHTTPServerHandler(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/nestedentry
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "cmd", "control-api", "main.go"), `package main
+
+import (
+	"net/http"
+
+	"example.com/nestedentry/internal/httpapi"
+)
+
+func main() {
+	server := &http.Server{
+		Addr:    ":8080",
+		Handler: httpapi.New("dependency"),
+	}
+	_ = server
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "internal", "httpapi", "server.go"), `package httpapi
+
+import (
+	"example.com/nestedentry/internal/httpapi/health"
+	"github.com/labstack/echo/v5"
+)
+
+func New(dependency string) *echo.Echo {
+	e := echo.New()
+	health.Register(e, dependency)
+	return e
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "internal", "httpapi", "health", "routes.go"), `package health
+
+import "github.com/labstack/echo/v5"
+
+func Register(e *echo.Echo, dependency string) {
+	e.GET("/health/live", live)
+}
+
+func live(c echo.Context) error {
+	return c.JSON(200, map[string]string{"status": "ok"})
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "cmd", "control-api", "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+
+	if len(ir.Routes) != 1 || ir.Routes[0].Method != "GET" || ir.Routes[0].Path != "/health/live" {
+		t.Fatalf("expected only GET /health/live route, got %#v", ir.Routes)
+	}
+}
+
+func TestAssignmentRHSDoesNotExpandRecursiveRouterCalls(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/recursive\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import "github.com/labstack/echo/v5"
+
+func main() {
+	e := echo.New()
+	register(e.Group("/root"), 2)
+}
+
+func register(g *echo.Group, depth int) *echo.Group {
+	if depth == 0 {
+		g.GET("/leaf", handler)
+		return g
+	}
+	child := register(g.Group("/nested"), depth-1)
+	return child
+}
+
+func handler(c echo.Context) error { return c.NoContent(204) }
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || ir.Routes[0].Path != "/root/leaf" {
+		t.Fatalf("expected one finite route, got %#v", ir.Routes)
+	}
+}
+
+func TestUnusedClosureRoutesAreIgnored(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/closure\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import "github.com/labstack/echo/v5"
+
+func main() {
+	e := echo.New()
+	e.GET("/ok", handler)
+	unused := func() {
+		e.GET("/never-registered", handler)
+	}
+	_ = unused
+}
+
+func handler(c echo.Context) error { return c.NoContent(204) }
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || ir.Routes[0].Path != "/ok" {
+		t.Fatalf("unused closure must not register routes, got %#v", ir.Routes)
+	}
+}
+
+func TestParameterizedOrdinaryHelperIsNotBootstrapped(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/helper\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import "github.com/labstack/echo/v5"
+
+func helper(_ string) {
+	e := echo.New()
+	e.GET("/not-an-api", handler)
+}
+
+func main() {
+	e := echo.New()
+	e.GET("/ok", handler)
+	helper("ordinary-call")
+}
+
+func handler(c echo.Context) error { return c.NoContent(204) }
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || ir.Routes[0].Path != "/ok" {
+		t.Fatalf("ordinary helper must not be bootstrapped, got %#v", ir.Routes)
+	}
+}
+
+func TestNestedHTTPHandlerFactoryArgumentIsNotParsedTwice(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/dedup\n\ngo 1.24\n")
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"net/http"
+	"github.com/labstack/echo/v5"
+)
+
+func inner() *echo.Echo {
+	e := echo.New()
+	e.GET("/inner", handler)
+	return e
+}
+
+func outer(_ *echo.Echo) *echo.Echo {
+	inner()
+	e := echo.New()
+	e.GET("/outer", handler)
+	return e
+}
+
+func main() {
+	server := &http.Server{Handler: outer(inner())}
+	_ = server
+}
+
+func handler(c echo.Context) error { return c.NoContent(204) }
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	counts := map[string]int{}
+	for _, route := range ir.Routes {
+		counts[route.Path]++
+	}
+	if len(ir.Routes) != 2 || counts["/inner"] != 1 || counts["/outer"] != 1 {
+		t.Fatalf("nested factory calls should be parsed once, got %#v", ir.Routes)
+	}
+}
+
 func TestParseGinLocalChannelTypeInference(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/ginedge
