@@ -60,6 +60,16 @@ gswr --entry ./main.go --out docs/openapi.out --format json
 gswr --entry ./main.go --out docs/openapi.out --format yaml
 ```
 
+Upgrade a CLI installed with `go install`:
+
+```bash
+gswr upgrade
+```
+
+The command checks the latest GitHub Release and installs that concrete version.
+Locally built or manually downloaded binaries are left untouched and must be
+updated manually from GitHub Releases.
+
 ## Why Semantic Recognition
 
 Most generators rely heavily on doc comments.  

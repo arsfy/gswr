@@ -10,6 +10,7 @@ import (
 	"github.com/arsfy/gswr/internal/entrypoint"
 	"github.com/arsfy/gswr/internal/parser"
 	"github.com/arsfy/gswr/internal/renderer"
+	"github.com/arsfy/gswr/internal/upgrade"
 
 	"github.com/spf13/cobra"
 )
@@ -25,9 +26,10 @@ func main() {
 	)
 
 	rootCmd := &cobra.Command{
-		Use:   "gswr",
-		Short: "Generate OpenAPI from Echo routes via semantic analysis",
-		Long:  "gswr generates OpenAPI documents by parsing Echo routing and handler semantics.",
+		Use:          "gswr",
+		Short:        "Generate OpenAPI from Echo routes via semantic analysis",
+		Long:         "gswr generates OpenAPI documents by parsing Echo routing and handler semantics.",
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersionShort {
 				fmt.Fprintln(cmd.OutOrStdout(), currentVersion())
@@ -60,6 +62,18 @@ func main() {
 		},
 	}
 	rootCmd.AddCommand(generateCmd)
+	rootCmd.AddCommand(&cobra.Command{
+		Use:   "upgrade",
+		Short: "Upgrade gswr when installed with go install",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return upgrade.Run(cmd.Context(), upgrade.Options{
+				InjectedVersion: Version,
+				Out:             cmd.OutOrStdout(),
+				Err:             cmd.ErrOrStderr(),
+			})
+		},
+	})
 
 	rootCmd.InitDefaultHelpCmd()
 
