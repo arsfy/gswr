@@ -7,6 +7,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/arsfy/gswr/internal/entrypoint"
 	"github.com/arsfy/gswr/internal/parser"
 	"github.com/arsfy/gswr/internal/renderer"
 
@@ -33,34 +34,32 @@ func main() {
 				return nil
 			}
 
-			ir, err := parser.ParseEchoProject(entry)
-			if err != nil {
-				return fmt.Errorf("parse failed: %w", err)
-			}
-			actualFormat := resolveFormat(format, out)
-			switch actualFormat {
-			case "json":
-				if err := renderer.WriteJSON(ir, out); err != nil {
-					return fmt.Errorf("render failed: %w", err)
-				}
-			default:
-				if err := renderer.WriteYAML(ir, out); err != nil {
-					return fmt.Errorf("render failed: %w", err)
-				}
-			}
-
-			fmt.Fprintf(cmd.OutOrStdout(), "generated %s from %s (%d routes)\n", out, entry, len(ir.Routes))
-			return nil
+			return generate(cmd, ".", entry, out, format)
 		},
 		Version: currentVersion(),
 	}
 
-	flags := rootCmd.Flags()
-	flags.StringVar(&entry, "entry", "cmd/main.go", "entry go file")
+	flags := rootCmd.PersistentFlags()
+	flags.StringVar(&entry, "entry", "", "entry go file (auto-discovered when omitted)")
 	flags.StringVar(&out, "out", "docs/openapi.yaml", "output openapi file")
 	flags.StringVar(&format, "format", "auto", "output format: auto|yaml|json")
 	flags.BoolVarP(&showVersionShort, "version-short", "v", false, "print version and exit")
 	_ = flags.MarkHidden("version-short")
+
+	generateCmd := &cobra.Command{
+		Use:     "generate [project-dir]",
+		Aliases: []string{"g", "gen"},
+		Short:   "Generate OpenAPI and auto-discover func main",
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			root := "."
+			if len(args) == 1 {
+				root = args[0]
+			}
+			return generate(cmd, root, entry, out, format)
+		},
+	}
+	rootCmd.AddCommand(generateCmd)
 
 	rootCmd.InitDefaultHelpCmd()
 
@@ -68,6 +67,34 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func generate(cmd *cobra.Command, root, entry, out, format string) error {
+	selected := entry
+	if selected == "" {
+		var err error
+		selected, err = entrypoint.Discover(root)
+		if err != nil {
+			return fmt.Errorf("entry discovery failed: %w", err)
+		}
+	}
+	ir, err := parser.ParseEchoProject(selected)
+	if err != nil {
+		return fmt.Errorf("parse failed: %w", err)
+	}
+	actualFormat := resolveFormat(format, out)
+	switch actualFormat {
+	case "json":
+		if err := renderer.WriteJSON(ir, out); err != nil {
+			return fmt.Errorf("render failed: %w", err)
+		}
+	default:
+		if err := renderer.WriteYAML(ir, out); err != nil {
+			return fmt.Errorf("render failed: %w", err)
+		}
+	}
+	fmt.Fprintf(cmd.OutOrStdout(), "generated %s from %s (%d routes)\n", out, selected, len(ir.Routes))
+	return nil
 }
 
 func resolveFormat(format, out string) string {

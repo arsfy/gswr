@@ -33,13 +33,24 @@ Run:
 Generate YAML:
 
 ```bash
-gswr --entry ./main.go --out docs/openapi.yaml
+gswr generate
+# short alias
+gswr g
+```
+
+`gswr` automatically discovers `package main` / `func main()` and, when a
+project has multiple binaries, selects the only entry that produces API routes.
+You can also scan another project directory or explicitly resolve ambiguity:
+
+```bash
+gswr g ../my-service
+gswr g --entry ./cmd/control-api/main.go
 ```
 
 Generate JSON:
 
 ```bash
-gswr --entry ./main.go --out docs/openapi.json
+gswr g --out docs/openapi.json
 ```
 
 Force format explicitly:
