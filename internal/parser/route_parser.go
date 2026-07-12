@@ -226,8 +226,18 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	if h, ok := handlerArg.(*ast.FuncLit); ok {
 		semantics = s.parseHandlerSemantics(owner.pkg, owner.file, h.Body, mwParams, mwContextTypes)
 	}
-	if fm := s.resolveCallee(owner, handlerArg); fm != nil {
-		semantics = s.parseHandlerSemantics(fm.pkg, fm.file, fm.decl.Body, mwParams, mwContextTypes)
+	handlerCallee := handlerArg
+	if call, ok := handlerArg.(*ast.CallExpr); ok {
+		handlerCallee = call.Fun
+	}
+	if fm := s.resolveCallee(owner, handlerCallee); fm != nil {
+		handlerBody := fm.decl.Body
+		if call, ok := handlerArg.(*ast.CallExpr); ok {
+			if factoryBody := returnedHandlerBody(fm, call); factoryBody != nil {
+				handlerBody = factoryBody
+			}
+		}
+		semantics = s.parseHandlerSemantics(fm.pkg, fm.file, handlerBody, mwParams, mwContextTypes)
 		handlerName = fm.name
 		doc := parseRouteDoc(fm.decl.Doc)
 		if doc.summary != "" || doc.description != "" || len(doc.tags) > 0 {
@@ -267,6 +277,39 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		Responses:    semantics.responses,
 	})
 	return true
+}
+
+// returnedHandlerBody resolves the common Echo handler-factory pattern:
+//
+//	func handler(dependency T) echo.HandlerFunc {
+//		return func(c echo.Context) error { ... }
+//	}
+//
+// Route registration passes a call to the factory rather than the handler
+// itself, so parsing the factory's outer body would otherwise skip the actual
+// request/response logic nested in the returned function literal.
+func returnedHandlerBody(fm *funcMeta, call *ast.CallExpr) *ast.BlockStmt {
+	if fm == nil || fm.decl == nil || fm.decl.Body == nil || call == nil {
+		return nil
+	}
+	var body *ast.BlockStmt
+	ast.Inspect(fm.decl.Body, func(n ast.Node) bool {
+		if body != nil {
+			return false
+		}
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		for _, result := range ret.Results {
+			if fn, ok := result.(*ast.FuncLit); ok && fn.Body != nil {
+				body = fn.Body
+				return false
+			}
+		}
+		return true
+	})
+	return body
 }
 
 func splitRouteHandlerAndMiddlewareArgs(args []ast.Expr, convention routeCallConvention) (ast.Expr, []ast.Expr, bool) {

@@ -630,6 +630,71 @@ func containsString(items []string, target string) bool {
 	return false
 }
 
+func TestParseEchoHandlerFactory(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/factory
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"net/http"
+	"github.com/labstack/echo/v5"
+)
+
+type loginRequest struct {
+	Email string `+"`json:\"email\"`"+`
+	Password string `+"`json:\"password\"`"+`
+}
+
+type userResponse struct {
+	ID string `+"`json:\"id\"`"+`
+	Name string `+"`json:\"name\"`"+`
+}
+
+func main() {
+	e := echo.New()
+	e.POST("/api/v1/auth/login", login("dependency"))
+}
+
+// @summary Login
+// @description Authenticate with email and password.
+func login(dependency string) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input loginRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+		}
+		_ = dependency
+		return c.JSON(http.StatusOK, userResponse{ID: "1", Name: "Alice"})
+	}
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 {
+		t.Fatalf("expected one route, got %#v", ir.Routes)
+	}
+	route := ir.Routes[0]
+	if route.OperationID != "login" || route.Summary != "Login" || route.Description != "Authenticate with email and password." {
+		t.Fatalf("handler factory docs not preserved: %#v", route)
+	}
+	if route.RequestBody == nil || route.RequestBody.Properties["email"] == nil || route.RequestBody.Properties["password"] == nil {
+		t.Fatalf("handler factory request body not parsed: %#v", route.RequestBody)
+	}
+	if len(route.Responses) == 0 || route.Responses[0].StatusCode != 200 {
+		t.Fatalf("handler factory response not parsed: %#v", route.Responses)
+	}
+	response := route.Responses[0].Schema
+	if response == nil || response.Properties["id"] == nil || response.Properties["name"] == nil {
+		t.Fatalf("handler factory response schema not parsed: %#v", response)
+	}
+}
+
 func mustWriteFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
