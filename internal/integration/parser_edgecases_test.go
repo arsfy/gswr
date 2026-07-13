@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -156,6 +157,94 @@ func live(c echo.Context) error {
 
 	if len(ir.Routes) != 1 || ir.Routes[0].Method != "GET" || ir.Routes[0].Path != "/health/live" {
 		t.Fatalf("expected only GET /health/live route, got %#v", ir.Routes)
+	}
+}
+
+func TestNestedJSONResponseHelpersPreserveStatusAndDataSchema(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/nestedresponse
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"example.com/nestedresponse/api"
+	"github.com/labstack/echo/v5"
+)
+
+func main() {
+	e := echo.New()
+	e.GET("/items", api.List)
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "api", "routes.go"), `package api
+
+import (
+	"net/http"
+
+	"example.com/nestedresponse/identity"
+	"example.com/nestedresponse/types"
+	"github.com/labstack/echo/v5"
+)
+
+type Item struct {
+	ID int `+"`json:\"id\"`"+`
+}
+
+func List(c *echo.Context) error {
+	return types.JSON(c, http.StatusCreated, map[string]any{
+		"items": []Item{{ID: 1}},
+		"label": identity.Current(),
+	})
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "identity", "current.go"), `package identity
+
+func Current() string {
+	value := "current"
+	return value
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "types", "response.go"), `package types
+
+import "github.com/labstack/echo/v5"
+
+type H struct {
+	Code string `+"`json:\"code\"`"+`
+	Data any `+"`json:\"data\"`"+`
+}
+
+func OK(data any) H {
+	return H{Code: "ok", Data: data}
+}
+
+func JSON(c *echo.Context, status int, data any) error {
+	return c.JSON(status, OK(data))
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || len(ir.Routes[0].Responses) != 1 {
+		t.Fatalf("expected one route response, got %#v", ir.Routes)
+	}
+	resp := ir.Routes[0].Responses[0]
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected nested helper status 201, got %#v", resp)
+	}
+	if resp.Schema == nil || resp.Schema.Properties["code"] == nil || resp.Schema.Properties["data"] == nil {
+		t.Fatalf("expected response envelope schema, got %#v", resp.Schema)
+	}
+	data := resp.Schema.Properties["data"]
+	items := data.Properties["items"]
+	if items == nil || items.Type != "array" || items.Items == nil || items.Items.Ref == "" {
+		t.Fatalf("expected nested typed items schema, got %#v", data)
+	}
+	if label := data.Properties["label"]; label == nil || label.Type != "string" {
+		t.Fatalf("expected nested imported call schema to remain string, got %#v", label)
 	}
 }
 

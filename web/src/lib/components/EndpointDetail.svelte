@@ -9,7 +9,6 @@
     joinServerUrl,
     resolveSchemaRef,
   } from '../openapi';
-  import SchemaView from './SchemaView.svelte';
   import JsonPreview from './JsonPreview.svelte';
   import PathText from './PathText.svelte';
 
@@ -267,8 +266,6 @@
           </div>
           <JsonPreview value={requestBodyExample} />
         </div>
-        <div class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">Schema</div>
-        <SchemaView {schema} schemas={spec.components?.schemas} />
       {:else}
         <div class="font-mono text-sm text-text-muted">No schema defined.</div>
       {/if}
@@ -301,8 +298,6 @@
                 </div>
                 <JsonPreview value={activeResponseExample ?? ''} />
               </div>
-              <div class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">Schema</div>
-              <SchemaView schema={activeResponseSchema} schemas={spec.components?.schemas} />
             {:else}
               <div class="font-mono text-sm text-text-muted">No schema defined.</div>
             {/if}

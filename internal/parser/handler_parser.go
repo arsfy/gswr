@@ -196,7 +196,7 @@ func (s *parserState) tryExtractHelperResponse(pkg string, file *fileCtx, call *
 
 func (s *parserState) extractJSONResponseFromCall(pkg string, file *fileCtx, call *ast.CallExpr, varTypes map[string]ast.Expr, varValues map[string]ast.Expr, bindings map[string]ast.Expr) (model.Response, bool) {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "JSON" || len(call.Args) < 2 {
+	if !ok || sel.Sel.Name != "JSON" || len(call.Args) != 2 || !isLikelyRequestContextReceiver(resolveBindingExpr(sel.X, bindings)) {
 		return model.Response{}, false
 	}
 	statusExpr := resolveExprWithContext(call.Args[0], bindings, varValues, map[string]bool{})

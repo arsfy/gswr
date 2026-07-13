@@ -19,6 +19,12 @@ func (s *parserState) schemaFromExprWithVars(pkg string, file *fileCtx, expr ast
 }
 
 func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCtx, expr ast.Expr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
+	if expr != nil && expr.Pos().IsValid() && s.fset != nil {
+		if origin := s.filesByPath[s.fset.Position(expr.Pos()).Filename]; origin != nil {
+			pkg = origin.pkg
+			file = origin
+		}
+	}
 	switch n := expr.(type) {
 	case *ast.CompositeLit:
 		return s.schemaFromCompositeLit(pkg, file, n, varTypes, bindings)
@@ -56,13 +62,73 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 		}
 		return &model.Schema{Type: "object"}
 	case *ast.CallExpr:
+		resultSchema := s.schemaFromCallResult(pkg, file, n, varTypes, bindings)
+		if schemaHasConcreteShape(resultSchema) {
+			return resultSchema
+		}
 		if t, ok := s.inferTypeFromExprWithResolver(pkg, file, n, varTypes); ok {
 			return s.schemaFromTypeExpr(pkg, file, t)
+		}
+		if resultSchema != nil {
+			return resultSchema
 		}
 		return &model.Schema{Type: "object"}
 	default:
 		return &model.Schema{Type: "object"}
 	}
+}
+
+func schemaHasConcreteShape(schema *model.Schema) bool {
+	if schema == nil {
+		return false
+	}
+	return schema.Ref != "" || schema.Type != "object" || len(schema.Properties) > 0 || schema.Items != nil || schema.AdditionalProperties != nil
+}
+
+func (s *parserState) schemaFromCallResult(pkg string, file *fileCtx, call *ast.CallExpr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
+	fm := s.resolveCalleeByPkg(pkg, file, call.Fun)
+	if fm == nil || fm.decl == nil || fm.decl.Body == nil || fm.decl.Type == nil || fm.decl.Type.Params == nil {
+		return nil
+	}
+
+	key := "schema-call:" + fm.file.path + ":" + fm.name
+	if s.visitingKey[key] {
+		return nil
+	}
+	s.visitingKey[key] = true
+	defer delete(s.visitingKey, key)
+
+	localBindings := map[string]ast.Expr{}
+	for name, expr := range bindings {
+		localBindings[name] = expr
+	}
+	argIdx := 0
+	for _, field := range fm.decl.Type.Params.List {
+		for _, name := range field.Names {
+			if argIdx < len(call.Args) {
+				localBindings[name.Name] = resolveExprWithContext(call.Args[argIdx], bindings, nil, map[string]bool{})
+			}
+			argIdx++
+		}
+	}
+
+	var result *model.Schema
+	ast.Inspect(fm.decl.Body, func(node ast.Node) bool {
+		if result != nil {
+			return false
+		}
+		if _, ok := node.(*ast.FuncLit); ok {
+			return false
+		}
+		ret, ok := node.(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return true
+		}
+		expr := resolveExprWithContext(ret.Results[0], localBindings, nil, map[string]bool{})
+		result = s.schemaFromExprWithVarsAndBindings(fm.pkg, fm.file, expr, varTypes, localBindings)
+		return result == nil
+	})
+	return result
 }
 
 func (s *parserState) schemaFromSelectorValue(pkg string, file *fileCtx, sel *ast.SelectorExpr, varTypes map[string]ast.Expr) *model.Schema {

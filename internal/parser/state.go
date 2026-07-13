@@ -35,6 +35,7 @@ type parserState struct {
 	apiSchemes           []string
 	apiHost              string
 	filesByPkg           map[string][]*fileCtx
+	filesByPath          map[string]*fileCtx
 	funcsByPkg           map[string]map[string]*funcMeta
 	funcsByImportPath    map[string]map[string]*funcMeta
 	namedTypesByPkg      map[string]map[string]*namedTypeMeta

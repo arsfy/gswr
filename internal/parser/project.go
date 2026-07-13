@@ -32,6 +32,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		apiSchemes:           nil,
 		apiHost:              "",
 		filesByPkg:           map[string][]*fileCtx{},
+		filesByPath:          map[string]*fileCtx{},
 		funcsByPkg:           map[string]map[string]*funcMeta{},
 		funcsByImportPath:    map[string]map[string]*funcMeta{},
 		namedTypesByPkg:      map[string]map[string]*namedTypeMeta{},
@@ -74,6 +75,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 			imports:    parseImports(f),
 		}
 		state.filesByPkg[ctx.pkg] = append(state.filesByPkg[ctx.pkg], ctx)
+		state.filesByPath[path] = ctx
 		if state.funcsByPkg[ctx.pkg] == nil {
 			state.funcsByPkg[ctx.pkg] = map[string]*funcMeta{}
 		}
