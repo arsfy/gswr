@@ -1,0 +1,3642 @@
+openapi: 3.0.3
+info:
+    title: Goveto Edge Control API
+    version: 0.1.0
+    description: Control-plane API for managing edge clusters, nodes, sites, certificates, publish, purge and analytics.
+servers:
+    - url: /
+tags:
+    - name: analytics
+    - name: auth
+    - name: certificates
+    - name: clusters
+    - name: dns
+    - name: health
+    - name: nodes
+    - name: publish
+    - name: purge
+    - name: session
+    - name: sites
+paths:
+    /api/v1/auth/login:
+        post:
+            operationId: login
+            summary: Login
+            description: Authenticate with email, password and optional TOTP code; sets session cookie.
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                code:
+                                    type: string
+                                email:
+                                    type: string
+                                password:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            email:
+                                                type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            role:
+                                                $ref: '#/components/schemas/model_UserRole'
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
+    /api/v1/auth/me:
+        get:
+            operationId: me
+            summary: Current user
+            description: Return the authenticated user id from the current session.
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            uid:
+                                                type: string
+                                        required:
+                                            - uid
+    /api/v1/auth/register:
+        post:
+            operationId: register
+            summary: Register
+            description: Create a new user account when registration is enabled; requires captcha.
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                captcha_token:
+                                    type: string
+                                email:
+                                    type: string
+                                name:
+                                    type: string
+                                password:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            email:
+                                                type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            role:
+                                                $ref: '#/components/schemas/model_UserRole'
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
+    /api/v1/auth/registration-config:
+        get:
+            operationId: registrationConfig
+            summary: Registration config
+            description: Return whether registration is enabled and public captcha settings.
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            enabled:
+                                                type: object
+                                        required:
+                                            - enabled
+    /api/v1/clusters:
+        get:
+            operationId: listAvailable
+            summary: List clusters
+            description: List clusters the current user can access and the selected cluster id.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            clusters:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_clusterChoice'
+                                            requires_cluster:
+                                                type: boolean
+                                            selected_cluster_id:
+                                                type: object
+                                        required:
+                                            - clusters
+                                            - requires_cluster
+                                            - selected_cluster_id
+        post:
+            operationId: create
+            summary: Create cluster
+            description: Create a new cluster owned by the current user and select it in session.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            cluster:
+                                                type: object
+                                            selected_cluster_id:
+                                                type: object
+                                        required:
+                                            - cluster
+                                            - selected_cluster_id
+    /api/v1/clusters/{cluster_id}/analytics/distributions/{dimension}:
+        get:
+            operationId: ranking
+            summary: Ranking / distribution
+            description: Rank or distribute traffic by dimension (period, sort, limit query params).
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: dimension
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: period
+                  in: query
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: sort
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/analytics/nodes/runtime:
+        get:
+            operationId: nodeRuntime
+            summary: Node runtime series
+            description: Time-series node runtime metrics (optional node_id filter).
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                - name: node_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                - name: period
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            period:
+                                                type: string
+                                            series:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                                        required:
+                                            - period
+                                            - series
+    /api/v1/clusters/{cluster_id}/analytics/rankings/{dimension}:
+        get:
+            operationId: ranking
+            summary: Ranking / distribution
+            description: Rank or distribute traffic by dimension (period, sort, limit query params).
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: dimension
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: period
+                  in: query
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
+                - name: sort
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/analytics/summary:
+        get:
+            operationId: summary
+            summary: Analytics summary
+            description: Aggregate request/traffic summary for a time range (from/to).
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                - name: site_id
+                  in: query
+                  schema:
+                    type: string
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/analytics/top-ips:
+        get:
+            operationId: top
+            summary: Top URLs or IPs
+            description: Top ranked URLs or client IPs for a time range.
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: site_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/analytics/top-urls:
+        get:
+            operationId: top
+            summary: Top URLs or IPs
+            description: Top ranked URLs or client IPs for a time range.
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: site_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/analytics/traffic:
+        get:
+            operationId: traffic
+            summary: Traffic series
+            description: 'Time-series traffic metrics for a cluster or site (period: 24h or 30d).'
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TrafficPoint'
+                - name: period
+                  in: query
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TrafficPoint'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            granularity:
+                                                type: object
+                                            period:
+                                                type: string
+                                            series:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/analytics_TrafficPoint'
+                                        required:
+                                            - granularity
+                                            - period
+                                            - series
+    /api/v1/clusters/{cluster_id}/certificates:
+        get:
+            operationId: list
+            summary: List certificates
+            description: List TLS certificates in the cluster (private keys omitted).
+            tags:
+                - certificates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: upload
+            summary: Upload certificate
+            description: Upload a certificate and private key pair for the cluster.
+            tags:
+                - certificates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                certificate:
+                                    type: string
+                                name:
+                                    type: string
+                                private_key:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/dns:
+        get:
+            operationId: getConfig
+            summary: Get DNS config
+            description: Return cluster primary hostname and managed DNS provider configuration.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            primary_hostname:
+                                                type: string
+                                            provider:
+                                                type: object
+                                                properties:
+                                                    credentials_configured:
+                                                        type: boolean
+                                                    default_ttl:
+                                                        type: number
+                                                    enabled:
+                                                        type: boolean
+                                                    proxied:
+                                                        type: boolean
+                                                    type:
+                                                        $ref: '#/components/schemas/model_DNSProviderType'
+                                                    zone:
+                                                        type: string
+                                                    zone_id:
+                                                        type: string
+                                                required:
+                                                    - credentials_configured
+                                                    - default_ttl
+                                                    - enabled
+                                                    - proxied
+                                                    - type
+                                                    - zone
+                                                    - zone_id
+                                        required:
+                                            - primary_hostname
+                                            - provider
+        put:
+            operationId: updateConfig
+            summary: Update DNS config
+            description: Configure or update managed DNS provider settings and enqueue reconciliation.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                credentials:
+                                    type: object
+                                    additionalProperties:
+                                        type: string
+                                default_ttl:
+                                    type: number
+                                enabled:
+                                    type: boolean
+                                primary_hostname:
+                                    type: string
+                                provider:
+                                    $ref: '#/components/schemas/model_DNSProviderType'
+                                proxied:
+                                    type: boolean
+                                zone:
+                                    type: string
+                                zone_id:
+                                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSJob'
+        delete:
+            operationId: disableConfig
+            summary: Disable DNS
+            description: Disable managed DNS for the cluster and enqueue cleanup reconciliation.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSJob'
+    /api/v1/clusters/{cluster_id}/dns-lines:
+        get:
+            operationId: listDNSLines
+            summary: List DNS lines
+            description: List DNS lines configured for the cluster.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/dns/jobs:
+        get:
+            operationId: listJobs
+            summary: List DNS sync jobs
+            description: List recent DNS sync jobs for the cluster.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_DNSJob'
+    /api/v1/clusters/{cluster_id}/dns/lines:
+        post:
+            operationId: createLine
+            summary: Create DNS line
+            description: Create a DNS line and enqueue reconciliation when managed DNS is enabled.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                id:
+                                    type: string
+                                name:
+                                    type: string
+                                provider_code:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/model_DNSLine'
+    /api/v1/clusters/{cluster_id}/dns/lines/{line_id}:
+        delete:
+            operationId: deleteLine
+            summary: Delete DNS line
+            description: Delete a DNS line and enqueue reconciliation when managed DNS is enabled.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: line_id
+                  in: path
+                  required: true
+                  schema:
+                    type: object
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+    /api/v1/clusters/{cluster_id}/dns/records:
+        get:
+            operationId: listRecords
+            summary: List DNS records
+            description: List managed DNS records for the cluster.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/dns/sync:
+        post:
+            operationId: syncNow
+            summary: Sync DNS now
+            description: Enqueue an immediate DNS reconciliation job.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSJob'
+    /api/v1/clusters/{cluster_id}/groups:
+        get:
+            operationId: listGroups
+            summary: List groups
+            description: List node groups in the cluster.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: createGroup
+            summary: Create group
+            description: Create a node group in the cluster.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/members:
+        post:
+            operationId: addMember
+            summary: Add cluster member
+            description: Add a user as an OPERATOR member; only the cluster owner can call this.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                permission:
+                                    $ref: '#/components/schemas/model_ClusterPermission'
+                                user_id:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/nodes:
+        get:
+            operationId: list
+            summary: List nodes
+            description: List nodes in the cluster with addresses and site config versions.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: create
+            summary: Create node
+            description: Create a node and enqueue remote installation with SSH credentials.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                addresses:
+                                    type: array
+                                    items:
+                                        type: string
+                                dns_line_ids:
+                                    type: array
+                                    items:
+                                        type: string
+                                group_id:
+                                    type: string
+                                name:
+                                    type: string
+                                region_id:
+                                    type: string
+                                ssh:
+                                    $ref: '#/components/schemas/node_SSHInstallInput'
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: object
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - PENDING
+                                        required:
+                                            - id
+                                            - status
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}:
+        get:
+            operationId: get
+            summary: Get node
+            description: Get a single node with addresses, site config versions and cache config.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        delete:
+            operationId: deleteNode
+            summary: Delete node
+            description: Delete a node and related credentials, addresses and config records.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/addresses:
+        post:
+            operationId: addAddress
+            summary: Add node address
+            description: Add an IP address to a node; optionally mark it as primary.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                address:
+                                    type: string
+                                primary:
+                                    type: boolean
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/cache-config:
+        get:
+            operationId: getCacheConfig
+            summary: Get node cache config
+            description: Get disk cache configuration for a node.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        put:
+            operationId: updateCacheConfig
+            summary: Update node cache config
+            description: Update node disk cache settings and attempt to sync to the edge agent.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                auto_max_size:
+                                    type: boolean
+                                cache_directory:
+                                    type: string
+                                max_disk_usage_percent:
+                                    type: number
+                                max_size_bytes:
+                                    type: number
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            cache_config:
+                                                type: object
+                                            synced:
+                                                type: boolean
+                                                enum:
+                                                    - false
+                                        required:
+                                            - cache_config
+                                            - synced
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/disable:
+        post:
+            operationId: disableNode
+            summary: Disable node
+            description: Disable a node and remove it from DNS scheduling.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - DISABLED
+                                        required:
+                                            - id
+                                            - status
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/dns-lines:
+        put:
+            operationId: updateDNSLines
+            summary: Update node DNS lines
+            description: Replace the DNS lines assigned to a node and enqueue DNS reconciliation.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                dns_line_ids:
+                                    type: array
+                                    items:
+                                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            dns_line_ids:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            node_id:
+                                                type: string
+                                        required:
+                                            - dns_line_ids
+                                            - node_id
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/enable:
+        post:
+            operationId: enableNode
+            summary: Enable node
+            description: Re-enable a disabled node and wait for health checks.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            message:
+                                                type: string
+                                                enum:
+                                                    - waiting for health check
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - OFFLINE
+                                        required:
+                                            - id
+                                            - message
+                                            - status
+    /api/v1/clusters/{cluster_id}/publish/events:
+        get:
+            operationId: clusterEvents
+            summary: Cluster publish events
+            description: SSE stream of cluster publish sync status snapshots.
+            tags:
+                - publish
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+    /api/v1/clusters/{cluster_id}/publish/status:
+        get:
+            operationId: clusterStatus
+            summary: Cluster publish status
+            description: Aggregate publish job counts and recent tasks for the cluster.
+            tags:
+                - publish
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        additionalProperties:
+                                            type: object
+    /api/v1/clusters/{cluster_id}/regions:
+        get:
+            operationId: listRegions
+            summary: List regions
+            description: List regions in the cluster.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: createRegion
+            summary: Create region
+            description: Create a region in the cluster.
+            tags:
+                - clusters
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/sites:
+        post:
+            operationId: create
+            summary: Create site
+            description: Create a site with domains, origins and certificates; enqueues publish.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                certificate_ids:
+                                    type: array
+                                    items:
+                                        type: string
+                                domains:
+                                    type: array
+                                    items:
+                                        type: string
+                                name:
+                                    type: string
+                                origins:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/sites_originInput'
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: object
+                                            name:
+                                                type: string
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - ACTIVE
+                                        required:
+                                            - id
+                                            - name
+                                            - status
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/cache:
+        get:
+            operationId: getCache
+            summary: Get site cache policy
+            description: Get the site cache policy (defaults when none stored).
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            allow_purge_method:
+                                                type: boolean
+                                            conditions:
+                                                type: object
+                                                properties:
+                                                    group_operator:
+                                                        type: string
+                                                        enum:
+                                                            - OR
+                                                    groups:
+                                                        type: array
+                                                        items:
+                                                            $ref: '#/components/schemas/policy_CacheConditionGroup'
+                                            enabled:
+                                                type: boolean
+                                            response_headers:
+                                                type: object
+                                                properties:
+                                                    age:
+                                                        type: boolean
+                                                        enum:
+                                                            - true
+                                                    x_cache:
+                                                        type: boolean
+                                                        enum:
+                                                            - true
+                                            stale:
+                                                type: object
+                                                properties:
+                                                    enabled:
+                                                        type: boolean
+                                                        enum:
+                                                            - true
+                                                    if_error_seconds:
+                                                        type: number
+                                                        enum:
+                                                            - 86400
+                                            surrogate_key_header:
+                                                type: string
+                                                enum:
+                                                    - Surrogate-Key
+                                            ttl:
+                                                type: object
+                                                properties:
+                                                    default_seconds:
+                                                        type: number
+                                                        enum:
+                                                            - 300
+                                                    status:
+                                                        type: object
+                                                        properties:
+                                                            "200":
+                                                                type: number
+                                                                enum:
+                                                                    - 300
+                                                            "301":
+                                                                type: number
+                                                                enum:
+                                                                    - 3600
+                                                            "404":
+                                                                type: number
+                                                                enum:
+                                                                    - 60
+                                                        required:
+                                                            - "200"
+                                                            - "301"
+                                                            - "404"
+                                            vary_headers:
+                                                type: array
+                                                items:
+                                                    type: string
+        put:
+            operationId: updateCache
+            summary: Update site cache policy
+            description: Create or update the site cache policy and enqueue publish.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                allow_purge_method:
+                                    type: boolean
+                                conditions:
+                                    $ref: '#/components/schemas/policy_CacheConditions'
+                                enabled:
+                                    type: boolean
+                                response_headers:
+                                    $ref: '#/components/schemas/policy_CacheHeaders'
+                                stale:
+                                    $ref: '#/components/schemas/policy_CacheStale'
+                                surrogate_key_header:
+                                    type: string
+                                ttl:
+                                    $ref: '#/components/schemas/policy_CacheTTL'
+                                vary_headers:
+                                    type: array
+                                    items:
+                                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            cache:
+                                                $ref: '#/components/schemas/policy_CachePolicy'
+                                        required:
+                                            - cache
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/listener:
+        get:
+            operationId: getListener
+            summary: Get site listener
+            description: Get HTTP/HTTPS listener and TLS settings for a site.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        patch:
+            operationId: updateListener
+            summary: Update site listener
+            description: Partially update site listener/TLS settings and enqueue publish.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                hsts_enabled:
+                                    type: boolean
+                                hsts_include_subdomains:
+                                    type: boolean
+                                hsts_max_age:
+                                    type: number
+                                hsts_preload:
+                                    type: boolean
+                                http_enabled:
+                                    type: boolean
+                                http_port:
+                                    type: number
+                                http2_enabled:
+                                    type: boolean
+                                http3_enabled:
+                                    type: boolean
+                                https_enabled:
+                                    type: boolean
+                                https_port:
+                                    type: number
+                                ocsp_stapling_enabled:
+                                    type: boolean
+                                redirect_http_to_https:
+                                    type: boolean
+                                tls_min_version:
+                                    $ref: '#/components/schemas/model_TLSMinVersion'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            listener:
+                                                type: object
+                                        required:
+                                            - listener
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/publish:
+        get:
+            operationId: listJobs
+            summary: List publish jobs
+            description: List recent publish jobs for a site.
+            tags:
+                - publish
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: enqueue
+            summary: Enqueue publish
+            description: Enqueue a site configuration publish job.
+            tags:
+                - publish
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/publish/{job_id}:
+        get:
+            operationId: getJob
+            summary: Get publish job
+            description: Get a single site publish job by id.
+            tags:
+                - publish
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: job_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        additionalProperties:
+                                            type: object
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/purge:
+        get:
+            operationId: list
+            summary: List purge jobs
+            description: List recent cache purge jobs for a site.
+            tags:
+                - purge
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+        post:
+            operationId: enqueue
+            summary: Enqueue purge
+            description: Enqueue a cache purge job for the site.
+            tags:
+                - purge
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                type:
+                                    $ref: '#/components/schemas/model_PurgeType'
+                                value:
+                                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        additionalProperties:
+                                            type: object
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/purge/{job_id}:
+        get:
+            operationId: get
+            summary: Get purge job
+            description: Get a single cache purge job by id.
+            tags:
+                - purge
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: job_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        additionalProperties:
+                                            type: object
+    /api/v1/session/cluster:
+        put:
+            operationId: selectCurrent
+            summary: Select cluster
+            description: Set the current session cluster context.
+            tags:
+                - session
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                cluster_id:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            selected_cluster_id:
+                                                type: string
+                                        required:
+                                            - selected_cluster_id
+    /health/live:
+        get:
+            operationId: live
+            summary: Liveness
+            description: Process liveness probe; returns ok when the process is running.
+            tags:
+                - health
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - ok
+                                        required:
+                                            - status
+    /health/ready:
+        get:
+            operationId: ready
+            summary: Readiness
+            description: Readiness probe; checks database connectivity.
+            tags:
+                - health
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - ok
+                                        required:
+                                            - status
+                "503":
+                    description: Server Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - service_unavailable
+                                    msg:
+                                        type: string
+                                        enum:
+                                            - unavailable
+components:
+    schemas:
+        analytics_DistributionItem:
+            type: object
+            properties:
+                egress_bytes:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+                value:
+                    type: string
+        analytics_NodeRuntimePoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cpu_usage_percent:
+                    type: number
+                load_1:
+                    type: number
+                load_5:
+                    type: number
+                load_15:
+                    type: number
+                memory_total_bytes:
+                    type: number
+                memory_used_bytes:
+                    type: number
+                node_id:
+                    type: string
+        analytics_Summary:
+            type: object
+            properties:
+                cache_hits:
+                    type: number
+                cache_misses:
+                    type: number
+                egress_bytes:
+                    type: number
+                hit_rate:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+        analytics_TopItem:
+            type: object
+            properties:
+                requests:
+                    type: number
+                traffic_bytes:
+                    type: number
+                value:
+                    type: string
+        analytics_TrafficPoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cache_egress_bytes:
+                    type: number
+                egress_bytes:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+        clusters_clusterChoice:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                role:
+                    type: string
+        model_AuditLog:
+            type: object
+            properties:
+                action:
+                    type: string
+                actor:
+                    type: string
+                actorId:
+                    type: string
+                afterJson:
+                    type: object
+                beforeJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                resource:
+                    type: string
+                user:
+                    $ref: '#/components/schemas/model_User'
+        model_Certificate:
+            type: object
+            properties:
+                certPem:
+                    type: string
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                expiresAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                fingerprint:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                privateKeyPem:
+                    type: string
+                sites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_SiteCertificate'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_Cluster:
+            type: object
+            properties:
+                certificates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Certificate'
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                creator:
+                    $ref: '#/components/schemas/model_User'
+                creatorId:
+                    type: string
+                dnsLines:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSLine'
+                dnsProvider:
+                    $ref: '#/components/schemas/model_DNSProviderConfig'
+                dnsRecords:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSManagedRecord'
+                dnsSyncJobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSSyncJob'
+                groups:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_ClusterGroup'
+                id:
+                    type: string
+                members:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_ClusterMember'
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Node'
+                originPools:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_OriginPool'
+                primaryHostname:
+                    type: string
+                regions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_ClusterRegion'
+                sites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Site'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ClusterGroup:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Node'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ClusterMember:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                permission:
+                    $ref: '#/components/schemas/model_ClusterPermission'
+                user:
+                    $ref: '#/components/schemas/model_User'
+                userId:
+                    type: string
+        model_ClusterPermission:
+            type: string
+        model_ClusterRegion:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Node'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ConfigStatus:
+            type: string
+        model_ConfigVersion:
+            type: object
+            properties:
+                configJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hash:
+                    type: string
+                id:
+                    type: string
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                version:
+                    type: number
+        model_DNSLine:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeDNSLine'
+                providerCode:
+                    type: string
+                records:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSManagedRecord'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_DNSManagedRecord:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                dnsLine:
+                    $ref: '#/components/schemas/model_DNSLine'
+                dnsLineId:
+                    type: string
+                dnsLineKey:
+                    type: string
+                hostname:
+                    type: string
+                id:
+                    type: string
+                lastError:
+                    type: string
+                lastSyncedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                providerRecordId:
+                    type: string
+                siteDomain:
+                    $ref: '#/components/schemas/model_SiteDomain'
+                siteDomainId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_DNSRecordStatus'
+                type:
+                    $ref: '#/components/schemas/model_DNSRecordType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                value:
+                    type: string
+        model_DNSProviderConfig:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credentialsEncrypted:
+                    type: string
+                defaultTtl:
+                    type: number
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                provider:
+                    $ref: '#/components/schemas/model_DNSProviderType'
+                proxied:
+                    type: boolean
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                zone:
+                    type: string
+                zoneId:
+                    type: string
+        model_DNSProviderType:
+            type: string
+        model_DNSRecordStatus:
+            type: string
+        model_DNSRecordType:
+            type: string
+        model_DNSSyncAction:
+            type: string
+        model_DNSSyncJob:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/model_DNSSyncAction'
+                attempts:
+                    type: number
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                leaseUntil:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: number
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                resultJson:
+                    type: object
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_JobStatus:
+            type: string
+        model_Node:
+            type: object
+            properties:
+                addresses:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeAddress'
+                cacheConfig:
+                    $ref: '#/components/schemas/model_NodeCacheConfig'
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credential:
+                    $ref: '#/components/schemas/model_NodeCredential'
+                dnsLines:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeDNSLine'
+                dnsRecords:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSManagedRecord'
+                group:
+                    $ref: '#/components/schemas/model_ClusterGroup'
+                groupId:
+                    type: string
+                heartbeatAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                region:
+                    $ref: '#/components/schemas/model_ClusterRegion'
+                regionId:
+                    type: string
+                siteConfigVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeSiteConfigVersion'
+                status:
+                    $ref: '#/components/schemas/model_NodeStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: string
+        model_NodeAddress:
+            type: object
+            properties:
+                address:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                primary:
+                    type: boolean
+        model_NodeCacheConfig:
+            type: object
+            properties:
+                autoMaxSize:
+                    type: boolean
+                cacheDir:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                maxDiskUsagePercent:
+                    type: number
+                maxSizeBytes:
+                    type: number
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_NodeCredential:
+            type: object
+            properties:
+                communicationKeyEncrypted:
+                    type: string
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+        model_NodeDNSLine:
+            type: object
+            properties:
+                dnsLine:
+                    $ref: '#/components/schemas/model_DNSLine'
+                dnsLineId:
+                    type: string
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+        model_NodeSiteConfigVersion:
+            type: object
+            properties:
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
+        model_NodeStatus:
+            type: string
+        model_OriginBackend:
+            type: object
+            properties:
+                address:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                enabled:
+                    type: boolean
+                hostHeader:
+                    type: string
+                id:
+                    type: string
+                originPool:
+                    $ref: '#/components/schemas/model_OriginPool'
+                originPoolId:
+                    type: string
+                protocol:
+                    $ref: '#/components/schemas/model_OriginProtocol'
+                weight:
+                    type: number
+        model_OriginPool:
+            type: object
+            properties:
+                backends:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_OriginBackend'
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                headers:
+                    type: object
+                healthUri:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                scheduler:
+                    type: string
+                sites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Site'
+                timeout:
+                    type: number
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_OriginProtocol:
+            type: string
+        model_Policy:
+            type: object
+            properties:
+                accessJson:
+                    type: object
+                cacheJson:
+                    type: object
+                ccJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                sites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Site'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                wafJson:
+                    type: object
+        model_PublishJob:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                resultJson:
+                    type: object
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                targets:
+                    type: object
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
+        model_PurgeJob:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                resultJson:
+                    type: object
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                type:
+                    $ref: '#/components/schemas/model_PurgeType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                value:
+                    type: string
+        model_PurgeType:
+            type: string
+        model_Site:
+            type: object
+            properties:
+                certificates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_SiteCertificate'
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                configVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_ConfigVersion'
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                creator:
+                    $ref: '#/components/schemas/model_User'
+                creatorId:
+                    type: string
+                dnsSyncJobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSSyncJob'
+                domains:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_SiteDomain'
+                id:
+                    type: string
+                listenerConfig:
+                    $ref: '#/components/schemas/model_SiteListenerConfig'
+                name:
+                    type: string
+                nodeConfigVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeSiteConfigVersion'
+                originPool:
+                    $ref: '#/components/schemas/model_OriginPool'
+                originPoolId:
+                    type: string
+                policy:
+                    $ref: '#/components/schemas/model_Policy'
+                policyId:
+                    type: string
+                publishJobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_PublishJob'
+                purgeJobs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_PurgeJob'
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
+        model_SiteCertificate:
+            type: object
+            properties:
+                certificate:
+                    $ref: '#/components/schemas/model_Certificate'
+                certificateId:
+                    type: string
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+        model_SiteDomain:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                dnsRecords:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_DNSManagedRecord'
+                hostname:
+                    type: string
+                id:
+                    type: string
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+        model_SiteListenerConfig:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hstsEnabled:
+                    type: boolean
+                hstsIncludeSubdomains:
+                    type: boolean
+                hstsMaxAge:
+                    type: number
+                hstsPreload:
+                    type: boolean
+                http2Enabled:
+                    type: boolean
+                http3Enabled:
+                    type: boolean
+                httpEnabled:
+                    type: boolean
+                httpPort:
+                    type: number
+                httpsEnabled:
+                    type: boolean
+                httpsPort:
+                    type: number
+                id:
+                    type: string
+                ocspStaplingEnabled:
+                    type: boolean
+                redirectHttpToHttps:
+                    type: boolean
+                site:
+                    $ref: '#/components/schemas/model_Site'
+                siteId:
+                    type: string
+                tlsMinVersion:
+                    $ref: '#/components/schemas/model_TLSMinVersion'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_SiteStatus:
+            type: string
+        model_TLSMinVersion:
+            type: string
+        model_User:
+            type: object
+            properties:
+                auditLogs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_AuditLog'
+                clusterMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_ClusterMember'
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                createdClusters:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Cluster'
+                createdSites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Site'
+                email:
+                    type: string
+                id:
+                    type: string
+                lastLoginAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                name:
+                    type: string
+                passwordHash:
+                    type: string
+                role:
+                    $ref: '#/components/schemas/model_UserRole'
+                sessions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_UserSession'
+                status:
+                    $ref: '#/components/schemas/model_UserStatus'
+                totpSecret:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_UserRole:
+            type: string
+        model_UserSession:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                expiresAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                tokenHash:
+                    type: string
+                user:
+                    $ref: '#/components/schemas/model_User'
+                userId:
+                    type: string
+        model_UserStatus:
+            type: string
+        node_SSHInstallInput:
+            type: object
+            properties:
+                entry_ip:
+                    type: string
+                passphrase:
+                    type: string
+                password:
+                    type: string
+                port:
+                    type: number
+                private_key:
+                    type: string
+                user:
+                    type: string
+        policy_CacheConditionGroup:
+            type: object
+            properties:
+                operator:
+                    type: string
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_CacheConditionRule'
+        policy_CacheConditionRule:
+            type: object
+            properties:
+                type:
+                    type: string
+                value:
+                    type: string
+                values:
+                    type: array
+                    items:
+                        type: string
+        policy_CacheConditions:
+            type: object
+            properties:
+                group_operator:
+                    type: string
+                groups:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_CacheConditionGroup'
+        policy_CacheHeaders:
+            type: object
+            properties:
+                age:
+                    type: boolean
+                x_cache:
+                    type: boolean
+        policy_CachePolicy:
+            type: object
+            properties:
+                allow_purge_method:
+                    type: boolean
+                conditions:
+                    $ref: '#/components/schemas/policy_CacheConditions'
+                enabled:
+                    type: boolean
+                response_headers:
+                    $ref: '#/components/schemas/policy_CacheHeaders'
+                stale:
+                    $ref: '#/components/schemas/policy_CacheStale'
+                surrogate_key_header:
+                    type: string
+                ttl:
+                    $ref: '#/components/schemas/policy_CacheTTL'
+                vary_headers:
+                    type: array
+                    items:
+                        type: string
+        policy_CacheStale:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                if_error_seconds:
+                    type: number
+        policy_CacheTTL:
+            type: object
+            properties:
+                default_seconds:
+                    type: number
+                status:
+                    type: object
+                    additionalProperties:
+                        type: number
+        query_NodeCacheConfigSetClause:
+            type: object
+            properties:
+                field:
+                    type: string
+                value:
+                    type: object
+        query_SiteListenerConfigSetClause:
+            type: object
+            properties:
+                field:
+                    type: string
+                value:
+                    type: object
+        sites_originInput:
+            type: object
+            properties:
+                address:
+                    type: string
+                host_header:
+                    type: string
+                protocol:
+                    $ref: '#/components/schemas/model_OriginProtocol'
+                weight:
+                    type: number
+        types_DNSJob:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/model_DNSSyncAction'
+                attempts:
+                    type: number
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                maxAttempts:
+                    type: number
+                resultJson:
+                    $ref: '#/components/schemas/types_DNSJobResult'
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+        types_DNSJobResult:
+            type: object
+            properties:
+                error:
+                    type: string
+    securitySchemes:
+        cookie_session:
+            type: apiKey
+            in: cookie
+            name: session

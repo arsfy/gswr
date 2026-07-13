@@ -108,8 +108,7 @@ type schemaObject struct {
 }
 
 func WriteYAML(ir *model.IR, outPath string) error {
-	doc := buildDoc(ir)
-	b, err := yaml.Marshal(doc)
+	b, err := MarshalYAML(ir)
 	if err != nil {
 		return err
 	}
@@ -117,13 +116,23 @@ func WriteYAML(ir *model.IR, outPath string) error {
 }
 
 func WriteJSON(ir *model.IR, outPath string) error {
-	doc := buildDoc(ir)
-	b, err := json.MarshalIndent(doc, "", "  ")
+	b, err := MarshalJSON(ir)
 	if err != nil {
 		return err
 	}
-	b = append(b, '\n')
 	return writeOutput(outPath, b)
+}
+
+func MarshalYAML(ir *model.IR) ([]byte, error) {
+	return yaml.Marshal(buildDoc(ir))
+}
+
+func MarshalJSON(ir *model.IR) ([]byte, error) {
+	b, err := json.MarshalIndent(buildDoc(ir), "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
 }
 
 func buildDoc(ir *model.IR) openAPIDoc {

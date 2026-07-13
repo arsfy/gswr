@@ -60,6 +60,16 @@ gswr --entry ./main.go --out docs/openapi.out --format json
 gswr --entry ./main.go --out docs/openapi.out --format yaml
 ```
 
+Open the embedded API reference UI:
+
+```bash
+gswr web
+# scan another project
+gswr web ../my-service
+```
+
+The command serves the UI at `http://127.0.0.1:43877` and opens it in the default browser.
+
 Upgrade a CLI installed with `go install`:
 
 ```bash
@@ -216,4 +226,11 @@ Run tests:
 
 ```bash
 go test ./...
+```
+
+Rebuild the frontend assets embedded by the CLI:
+
+```bash
+cd web
+pnpm build
 ```
