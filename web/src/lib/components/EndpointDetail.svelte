@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ClipboardCheck, ClipboardCopy, Play, Shield } from '@lucide/svelte';
+  import { ClipboardCheck, ClipboardCopy, Shield } from '@lucide/svelte';
   import type { OpenApiOperation, OpenApiSpec, OpenApiParameter, OpenApiResponse } from '../openapi';
   import {
     methodColor,
@@ -10,7 +10,6 @@
     resolveSchemaRef,
   } from '../openapi';
   import SchemaView from './SchemaView.svelte';
-  import RequestEditor from './RequestEditor.svelte';
   import JsonPreview from './JsonPreview.svelte';
   import PathText from './PathText.svelte';
 
@@ -23,7 +22,6 @@
 
   let copied = $state(false);
   let copiedCurl = $state(false);
-  let requestBody = $state('{}');
   let activeResponseTab = $state('200');
 
   const serverUrl = $derived(getServerUrl(spec));
@@ -36,6 +34,9 @@
   const activeResponseSchema = $derived(responseSchema(activeResponseTab));
   const activeResponseExample = $derived(
     activeResponseSchema ? JSON.stringify(exampleValue(activeResponseSchema), null, 2) : null,
+  );
+  const requestBodyExample = $derived(
+    operation.requestBody ? JSON.stringify(exampleValue(bodySchema(operation)), null, 2) : '{}',
   );
 
   function copyUrl() {
@@ -83,11 +84,6 @@
     return {};
   }
 
-  $effect(() => {
-    const schema = bodySchema(operation);
-    requestBody = JSON.stringify(exampleValue(schema), null, 2);
-  });
-
   function curlCommand(): string {
     const lines: string[] = [`curl -X ${operation.method.toUpperCase()} "${fullUrl}"`];
     lines.push('  -H "Content-Type: application/json"');
@@ -95,13 +91,9 @@
       lines.push('  -H "Cookie: session=<your-session-cookie>"');
     }
     if (operation.requestBody) {
-      lines.push(`  -d '${requestBody.replace(/'/g, "'\\''")}'`);
+      lines.push(`  -d '${requestBodyExample.replace(/'/g, "'\\''")}'`);
     }
     return lines.join(' \\\n');
-  }
-
-  function sendRequest() {
-    alert('This demo UI does not send real requests. Use the curl command below.');
   }
 
   function copyCurl() {
@@ -269,26 +261,17 @@
       </div>
 
       {#if schema}
-        <div class="mb-4">
-          <SchemaView {schema} schemas={spec.components?.schemas} />
+        <div class="rounded-lg border border-border overflow-hidden mb-4">
+          <div class="bg-surface-inset px-3 py-2 border-b border-border">
+            <span class="text-xs font-medium text-text-muted">application/json</span>
+          </div>
+          <JsonPreview value={requestBodyExample} />
         </div>
+        <div class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-2">Schema</div>
+        <SchemaView {schema} schemas={spec.components?.schemas} />
+      {:else}
+        <div class="font-mono text-sm text-text-muted">No schema defined.</div>
       {/if}
-
-      <div class="rounded-lg border border-border overflow-hidden">
-        <div class="bg-surface-inset px-3 py-2 border-b border-border flex items-center justify-between">
-          <span class="text-xs font-medium text-text-muted">application/json</span>
-          <button
-            onclick={sendRequest}
-            class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent text-white text-xs font-medium hover:bg-accent/90 transition-colors"
-          >
-            <Play class="w-3.5 h-3.5" />
-            Try
-          </button>
-        </div>
-        <div class="h-55 p-2 bg-surface">
-          <RequestEditor bind:value={requestBody} />
-        </div>
-      </div>
     </section>
   {/if}
 

@@ -3,7 +3,6 @@
   import { Collapsible } from 'bits-ui';
   import type { GroupedOperations, OpenApiOperation } from '../openapi';
   import { methodColor, operationSlug } from '../openapi';
-  import PathText from './PathText.svelte';
 
   interface Props {
     groups: GroupedOperations[];
@@ -35,6 +34,10 @@
 
   function isExpanded(tag: string) {
     return expanded.has(tag);
+  }
+
+  function endpointLabel(operation: OpenApiOperation) {
+    return operation.summary?.trim() || operation.path;
   }
 
   function setExpanded(tag: string, open: boolean) {
@@ -102,8 +105,9 @@
               >
                 {op.method.toUpperCase()}
               </span>
-              <span class="truncate font-mono text-xs text-text-heading" title={op.path}
-              ><PathText value={op.path} /></span>
+              <span class="truncate text-xs font-medium text-text-heading" title={op.path}>
+                {endpointLabel(op)}
+              </span>
             </button>
           {/each}
         </Collapsible.Content>

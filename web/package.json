@@ -27,12 +27,8 @@
     "vite": "^8.1.1"
   },
   "dependencies": {
-    "@codemirror/lang-json": "^6.0.2",
-    "@codemirror/state": "^6.7.1",
-    "@codemirror/view": "^6.43.6",
     "@lucide/svelte": "^1.24.0",
     "@types/js-yaml": "^4.0.9",
-    "codemirror": "^6.0.2",
     "js-yaml": "^5.2.1"
   }
 }
