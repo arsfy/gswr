@@ -254,6 +254,93 @@ func JSON(c *echo.Context, status int, data any) error {
 	}
 }
 
+func TestHandlerFactoryMethodChainResponseTypes(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/methodchain
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"example.com/methodchain/api"
+	"example.com/methodchain/client"
+	"github.com/labstack/echo/v5"
+)
+
+func main() {
+	e := echo.New()
+	var db *client.Client
+	e.GET("/config", api.GetConfig(db))
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "api", "routes.go"), `package api
+
+import (
+	"example.com/methodchain/client"
+	"github.com/labstack/echo/v5"
+)
+
+func GetConfig(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		record, err := db.Records.FindUnique()
+		if err != nil {
+			return err
+		}
+		return c.JSON(200, map[string]any{
+			"name": record.Name,
+			"count": record.Count,
+			"enabled": record.Enabled,
+			"configured": record.Secret != "",
+		})
+	}
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "client", "client.go"), `package client
+
+import "example.com/methodchain/model"
+
+type Client struct {
+	Records RecordActions
+}
+
+type RecordActions struct{}
+
+func (RecordActions) FindUnique() (*model.Record, error) {
+	return nil, nil
+}
+`)
+	mustWriteFile(t, filepath.Join(root, "model", "record.go"), `package model
+
+type Record struct {
+	Name *string
+	Count int
+	Enabled bool
+	Secret string
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || len(ir.Routes[0].Responses) != 1 {
+		t.Fatalf("expected one route response, got %#v", ir.Routes)
+	}
+	properties := ir.Routes[0].Responses[0].Schema.Properties
+	want := map[string]string{
+		"name":       "string",
+		"count":      "number",
+		"enabled":    "boolean",
+		"configured": "boolean",
+	}
+	for name, typ := range want {
+		if properties[name] == nil || properties[name].Type != typ {
+			t.Fatalf("expected %s to be %s, got %#v", name, typ, properties[name])
+		}
+	}
+}
+
 func TestAssignmentRHSDoesNotExpandRecursiveRouterCalls(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/recursive\n\ngo 1.24\n")

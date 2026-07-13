@@ -19,12 +19,7 @@ func (s *parserState) schemaFromExprWithVars(pkg string, file *fileCtx, expr ast
 }
 
 func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCtx, expr ast.Expr, varTypes map[string]ast.Expr, bindings map[string]ast.Expr) *model.Schema {
-	if expr != nil && expr.Pos().IsValid() && s.fset != nil {
-		if origin := s.filesByPath[s.fset.Position(expr.Pos()).Filename]; origin != nil {
-			pkg = origin.pkg
-			file = origin
-		}
-	}
+	pkg, file = s.scopeForExpr(pkg, file, expr)
 	switch n := expr.(type) {
 	case *ast.CompositeLit:
 		return s.schemaFromCompositeLit(pkg, file, n, varTypes, bindings)
@@ -79,9 +74,25 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 			return resultSchema
 		}
 		return &model.Schema{Type: "object"}
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ, token.LAND, token.LOR:
+			return &model.Schema{Type: "boolean"}
+		default:
+			return &model.Schema{Type: "object"}
+		}
 	default:
 		return &model.Schema{Type: "object"}
 	}
+}
+
+func (s *parserState) scopeForExpr(pkg string, file *fileCtx, expr ast.Expr) (string, *fileCtx) {
+	if expr != nil && expr.Pos().IsValid() && s.fset != nil {
+		if origin := s.filesByPath[s.fset.Position(expr.Pos()).Filename]; origin != nil {
+			return origin.pkg, origin
+		}
+	}
+	return pkg, file
 }
 
 func (s *parserState) resolveConstantExpr(file *fileCtx, expr ast.Expr) (ast.Expr, bool) {
@@ -174,7 +185,8 @@ func (s *parserState) resolveExprTypeWithVars(pkg string, file *fileCtx, expr as
 	case *ast.Ident:
 		if varTypes != nil {
 			if t, ok := varTypes[n.Name]; ok {
-				return pkg, file, t, true
+				resolvedPkg, resolvedFile := s.scopeForExpr(pkg, file, t)
+				return resolvedPkg, resolvedFile, t, true
 			}
 		}
 		if meta, ok := s.resolveNamedTypeInScope(pkg, file, n.Name); ok {

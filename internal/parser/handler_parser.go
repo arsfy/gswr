@@ -764,10 +764,54 @@ func (s *parserState) inferCallResultTypes(pkg string, file *fileCtx, call *ast.
 		return []ast.Expr{t}
 	}
 	fm := s.resolveCalleeByPkg(pkg, file, call.Fun)
+	if fm == nil {
+		fm = s.resolveMethodCallee(pkg, file, call.Fun, contextTypes)
+	}
 	if fm == nil || fm.decl == nil || fm.decl.Type == nil || fm.decl.Type.Results == nil {
 		return nil
 	}
 	return flattenFieldListTypes(fm.decl.Type.Results)
+}
+
+func (s *parserState) resolveMethodCallee(pkg string, file *fileCtx, fun ast.Expr, contextTypes map[string]ast.Expr) *funcMeta {
+	sel, ok := fun.(*ast.SelectorExpr)
+	if !ok {
+		return nil
+	}
+	receiverPkg, receiverFile, receiverExpr, ok := s.resolveExprTypeWithVars(pkg, file, sel.X, contextTypes)
+	if !ok || receiverFile == nil {
+		return nil
+	}
+	receiverName := typeExprName(receiverExpr)
+	if receiverName == "" {
+		return nil
+	}
+	if methods := s.methodsByImportPath[receiverFile.importPath][receiverName]; methods != nil {
+		return methods[sel.Sel.Name]
+	}
+	if files := s.filesByPkg[receiverPkg]; len(files) > 0 {
+		if methods := s.methodsByImportPath[files[0].importPath][receiverName]; methods != nil {
+			return methods[sel.Sel.Name]
+		}
+	}
+	return nil
+}
+
+func typeExprName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.SelectorExpr:
+		return n.Sel.Name
+	case *ast.StarExpr:
+		return typeExprName(n.X)
+	case *ast.IndexExpr:
+		return typeExprName(n.X)
+	case *ast.IndexListExpr:
+		return typeExprName(n.X)
+	default:
+		return ""
+	}
 }
 
 func (s *parserState) inferTimeCallResultType(pkg string, file *fileCtx, call *ast.CallExpr, contextTypes map[string]ast.Expr) (ast.Expr, bool) {

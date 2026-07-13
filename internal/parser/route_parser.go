@@ -232,12 +232,14 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 	}
 	if fm := s.resolveCallee(owner, handlerCallee); fm != nil {
 		handlerBody := fm.decl.Body
+		handlerContextTypes := mwContextTypes
 		if call, ok := handlerArg.(*ast.CallExpr); ok {
 			if factoryBody := returnedHandlerBody(fm, call); factoryBody != nil {
 				handlerBody = factoryBody
+				handlerContextTypes = mergeTypeMaps(mwContextTypes, functionParameterTypes(fm.decl))
 			}
 		}
-		semantics = s.parseHandlerSemantics(fm.pkg, fm.file, handlerBody, mwParams, mwContextTypes)
+		semantics = s.parseHandlerSemantics(fm.pkg, fm.file, handlerBody, mwParams, handlerContextTypes)
 		handlerName = fm.name
 		doc := parseRouteDoc(fm.decl.Doc)
 		if doc.summary != "" || doc.description != "" || len(doc.tags) > 0 {
@@ -277,6 +279,19 @@ func (s *parserState) tryRoute(owner *funcMeta, call *ast.CallExpr, env map[stri
 		Responses:    semantics.responses,
 	})
 	return true
+}
+
+func functionParameterTypes(decl *ast.FuncDecl) map[string]ast.Expr {
+	if decl == nil || decl.Type == nil || decl.Type.Params == nil {
+		return nil
+	}
+	out := map[string]ast.Expr{}
+	for _, field := range decl.Type.Params.List {
+		for _, name := range field.Names {
+			out[name.Name] = field.Type
+		}
+	}
+	return out
 }
 
 // returnedHandlerBody resolves the common Echo handler-factory pattern:

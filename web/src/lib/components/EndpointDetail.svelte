@@ -21,7 +21,7 @@
 
   let copied = $state(false);
   let copiedCurl = $state(false);
-  let activeResponseTab = $state('200');
+  let selectedResponseTab = $state<string | null>(null);
 
   const serverUrl = $derived(getServerUrl(spec));
   const fullUrl = $derived(joinServerUrl(serverUrl, operation.path));
@@ -29,6 +29,11 @@
   const queryParams = $derived((operation.parameters ?? []).filter((p: OpenApiParameter) => p.in === 'query'));
   const headerParams = $derived((operation.parameters ?? []).filter((p: OpenApiParameter) => p.in === 'header'));
   const responseCodes = $derived(Object.keys(operation.responses ?? {}).sort());
+  const activeResponseTab = $derived(
+    selectedResponseTab && responseCodes.includes(selectedResponseTab)
+      ? selectedResponseTab
+      : defaultResponseCode(operation.responses),
+  );
   const activeResponse = $derived(operation.responses?.[activeResponseTab]);
   const activeResponseSchema = $derived(responseSchema(activeResponseTab));
   const activeResponseExample = $derived(
@@ -37,6 +42,11 @@
   const requestBodyExample = $derived(
     operation.requestBody ? JSON.stringify(exampleValue(bodySchema(operation)), null, 2) : '{}',
   );
+
+  function defaultResponseCode(responses: OpenApiOperation['responses']): string {
+    const codes = Object.keys(responses ?? {}).sort();
+    return codes.find((code) => /^2\d\d$/.test(code)) ?? codes[0] ?? '';
+  }
 
   function copyUrl() {
     void navigator.clipboard.writeText(fullUrl).then(() => {
@@ -282,7 +292,7 @@
               class="px-4 py-2 text-sm font-medium border-r border-border transition-colors {activeResponseTab === code
                 ? 'bg-surface text-text-heading'
                 : 'text-text-muted hover:text-text-heading'}"
-              onclick={() => (activeResponseTab = code)}
+              onclick={() => (selectedResponseTab = code)}
             >
               {code}
             </button>

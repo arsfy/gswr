@@ -92,6 +92,7 @@
             <div class="text-xs text-text-muted">{spec.info.version} · {groups.reduce((n, g) => n + g.operations.length, 0)} endpoints</div>
           {/if}
         </div>
+        <div class="rounded px-1 py-0.5 bg-gray-900 flex justify-center text-text-muted text-xs">Beta</div>
       </div>
       <div class="flex min-w-0 items-center gap-3">
         <a

@@ -35,6 +35,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		filesByPath:          map[string]*fileCtx{},
 		funcsByPkg:           map[string]map[string]*funcMeta{},
 		funcsByImportPath:    map[string]map[string]*funcMeta{},
+		methodsByImportPath:  map[string]map[string]map[string]*funcMeta{},
 		namedTypesByPkg:      map[string]map[string]*namedTypeMeta{},
 		namedTypesByImport:   map[string]map[string]*namedTypeMeta{},
 		constantsByImport:    map[string]map[string]ast.Expr{},
@@ -83,6 +84,9 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		if state.funcsByImportPath[ctx.importPath] == nil {
 			state.funcsByImportPath[ctx.importPath] = map[string]*funcMeta{}
 		}
+		if state.methodsByImportPath[ctx.importPath] == nil {
+			state.methodsByImportPath[ctx.importPath] = map[string]map[string]*funcMeta{}
+		}
 		if state.namedTypesByPkg[ctx.pkg] == nil {
 			state.namedTypesByPkg[ctx.pkg] = map[string]*namedTypeMeta{}
 		}
@@ -93,8 +97,16 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 			state.constantsByImport[ctx.importPath] = map[string]ast.Expr{}
 		}
 		for _, decl := range f.Decls {
-			if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil {
+			if fd, ok := decl.(*ast.FuncDecl); ok {
+				receiverType := receiverTypeName(fd.Recv)
 				meta := &funcMeta{pkg: ctx.pkg, name: fd.Name.Name, decl: fd, file: ctx}
+				if receiverType != "" {
+					if state.methodsByImportPath[ctx.importPath][receiverType] == nil {
+						state.methodsByImportPath[ctx.importPath][receiverType] = map[string]*funcMeta{}
+					}
+					state.methodsByImportPath[ctx.importPath][receiverType][fd.Name.Name] = meta
+					continue
+				}
 				state.funcsByPkg[ctx.pkg][fd.Name.Name] = meta
 				state.funcsByImportPath[ctx.importPath][fd.Name.Name] = meta
 				if path == entryAbs && ctx.pkg == "main" && fd.Name.Name == "main" {
@@ -186,6 +198,28 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		Routes:      state.routes,
 		Components:  state.components,
 	}, nil
+}
+
+func receiverTypeName(fields *ast.FieldList) string {
+	if fields == nil || len(fields.List) == 0 {
+		return ""
+	}
+	var unwrap func(ast.Expr) string
+	unwrap = func(expr ast.Expr) string {
+		switch n := expr.(type) {
+		case *ast.Ident:
+			return n.Name
+		case *ast.StarExpr:
+			return unwrap(n.X)
+		case *ast.IndexExpr:
+			return unwrap(n.X)
+		case *ast.IndexListExpr:
+			return unwrap(n.X)
+		default:
+			return ""
+		}
+	}
+	return unwrap(fields.List[0].Type)
 }
 
 func collectConstantDecl(dst map[string]ast.Expr, decl *ast.GenDecl) {

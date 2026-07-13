@@ -38,6 +38,7 @@ type parserState struct {
 	filesByPath          map[string]*fileCtx
 	funcsByPkg           map[string]map[string]*funcMeta
 	funcsByImportPath    map[string]map[string]*funcMeta
+	methodsByImportPath  map[string]map[string]map[string]*funcMeta
 	namedTypesByPkg      map[string]map[string]*namedTypeMeta
 	namedTypesByImport   map[string]map[string]*namedTypeMeta
 	constantsByImport    map[string]map[string]ast.Expr
