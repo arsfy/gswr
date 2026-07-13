@@ -40,6 +40,7 @@ type parserState struct {
 	funcsByImportPath    map[string]map[string]*funcMeta
 	namedTypesByPkg      map[string]map[string]*namedTypeMeta
 	namedTypesByImport   map[string]map[string]*namedTypeMeta
+	constantsByImport    map[string]map[string]ast.Expr
 	components           map[string]*model.Schema
 	tagDescriptions      map[string]string
 	visitingKey          map[string]bool

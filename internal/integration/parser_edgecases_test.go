@@ -215,8 +215,10 @@ type H struct {
 	Data any `+"`json:\"data\"`"+`
 }
 
+const CodeOK = "ok"
+
 func OK(data any) H {
-	return H{Code: "ok", Data: data}
+	return H{Code: CodeOK, Data: data}
 }
 
 func JSON(c *echo.Context, status int, data any) error {
@@ -237,6 +239,10 @@ func JSON(c *echo.Context, status int, data any) error {
 	}
 	if resp.Schema == nil || resp.Schema.Properties["code"] == nil || resp.Schema.Properties["data"] == nil {
 		t.Fatalf("expected response envelope schema, got %#v", resp.Schema)
+	}
+	code := resp.Schema.Properties["code"]
+	if code.Type != "string" || len(code.Enum) != 1 || code.Enum[0] != "ok" {
+		t.Fatalf("expected response code enum ok, got %#v", code)
 	}
 	data := resp.Schema.Properties["data"]
 	items := data.Properties["items"]

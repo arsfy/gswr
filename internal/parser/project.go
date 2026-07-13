@@ -37,6 +37,7 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		funcsByImportPath:    map[string]map[string]*funcMeta{},
 		namedTypesByPkg:      map[string]map[string]*namedTypeMeta{},
 		namedTypesByImport:   map[string]map[string]*namedTypeMeta{},
+		constantsByImport:    map[string]map[string]ast.Expr{},
 		components:           map[string]*model.Schema{},
 		tagDescriptions:      map[string]string{},
 		visitingKey:          map[string]bool{},
@@ -88,6 +89,9 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		if state.namedTypesByImport[ctx.importPath] == nil {
 			state.namedTypesByImport[ctx.importPath] = map[string]*namedTypeMeta{}
 		}
+		if state.constantsByImport[ctx.importPath] == nil {
+			state.constantsByImport[ctx.importPath] = map[string]ast.Expr{}
+		}
 		for _, decl := range f.Decls {
 			if fd, ok := decl.(*ast.FuncDecl); ok && fd.Recv == nil {
 				meta := &funcMeta{pkg: ctx.pkg, name: fd.Name.Name, decl: fd, file: ctx}
@@ -119,7 +123,14 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 				}
 			}
 			gd, ok := decl.(*ast.GenDecl)
-			if !ok || gd.Tok != token.TYPE {
+			if !ok {
+				continue
+			}
+			if gd.Tok == token.CONST {
+				collectConstantDecl(state.constantsByImport[ctx.importPath], gd)
+				continue
+			}
+			if gd.Tok != token.TYPE {
 				continue
 			}
 			for _, spec := range gd.Specs {
@@ -175,6 +186,32 @@ func ParseEchoProject(entry string) (*model.IR, error) {
 		Routes:      state.routes,
 		Components:  state.components,
 	}, nil
+}
+
+func collectConstantDecl(dst map[string]ast.Expr, decl *ast.GenDecl) {
+	var previous []ast.Expr
+	for _, spec := range decl.Specs {
+		valueSpec, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		values := valueSpec.Values
+		if len(values) == 0 {
+			values = previous
+		} else {
+			previous = values
+		}
+		for i, name := range valueSpec.Names {
+			if len(values) == 0 {
+				continue
+			}
+			valueIdx := i
+			if valueIdx >= len(values) {
+				valueIdx = len(values) - 1
+			}
+			dst[name.Name] = values[valueIdx]
+		}
+	}
 }
 
 func findParseRoot(entryAbs string) string {

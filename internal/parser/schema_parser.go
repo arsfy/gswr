@@ -42,6 +42,9 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 		if n.Name == "true" || n.Name == "false" {
 			return &model.Schema{Type: "boolean", Enum: []any{n.Name == "true"}}
 		}
+		if value, ok := s.resolveConstantExpr(file, n); ok && value != expr {
+			return s.schemaFromExprWithVarsAndBindings(pkg, file, value, varTypes, bindings)
+		}
 		if varTypes != nil {
 			if t, ok := varTypes[n.Name]; ok {
 				return s.schemaFromTypeExpr(pkg, file, t)
@@ -52,6 +55,9 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 		}
 		return &model.Schema{Type: "object"}
 	case *ast.SelectorExpr:
+		if value, ok := s.resolveConstantExpr(file, n); ok && value != expr {
+			return s.schemaFromExprWithVarsAndBindings(pkg, file, value, varTypes, bindings)
+		}
 		if resolved := s.schemaFromSelectorValue(pkg, file, n, varTypes); resolved != nil {
 			return resolved
 		}
@@ -75,6 +81,30 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 		return &model.Schema{Type: "object"}
 	default:
 		return &model.Schema{Type: "object"}
+	}
+}
+
+func (s *parserState) resolveConstantExpr(file *fileCtx, expr ast.Expr) (ast.Expr, bool) {
+	if file == nil {
+		return nil, false
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		value, ok := s.constantsByImport[file.importPath][n.Name]
+		return value, ok
+	case *ast.SelectorExpr:
+		alias, ok := n.X.(*ast.Ident)
+		if !ok {
+			return nil, false
+		}
+		importPath := file.imports[alias.Name]
+		if importPath == "" {
+			return nil, false
+		}
+		value, ok := s.constantsByImport[importPath][n.Sel.Name]
+		return value, ok
+	default:
+		return nil, false
 	}
 }
 
