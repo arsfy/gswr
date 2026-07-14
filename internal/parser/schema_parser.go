@@ -42,7 +42,8 @@ func (s *parserState) schemaFromExprWithVarsAndBindings(pkg string, file *fileCt
 		}
 		if varTypes != nil {
 			if t, ok := varTypes[n.Name]; ok {
-				return s.schemaFromTypeExpr(pkg, file, t)
+				resolvedPkg, resolvedFile := s.scopeForExpr(pkg, file, t)
+				return s.schemaFromTypeExpr(resolvedPkg, resolvedFile, t)
 			}
 		}
 		if meta, ok := s.resolveNamedTypeInScope(pkg, file, n.Name); ok {
@@ -207,6 +208,13 @@ func (s *parserState) resolveExprTypeWithVars(pkg string, file *fileCtx, expr as
 		return s.resolveSelectorFieldType(pkg, file, n, varTypes)
 	case *ast.StarExpr:
 		return s.resolveExprTypeWithVars(pkg, file, n.X, varTypes)
+	case *ast.CallExpr:
+		resultTypes := s.inferCallResultTypes(pkg, file, n, varTypes)
+		if len(resultTypes) == 0 {
+			return "", nil, nil, false
+		}
+		resolvedPkg, resolvedFile := s.scopeForExpr(pkg, file, resultTypes[0])
+		return resolvedPkg, resolvedFile, resultTypes[0], true
 	default:
 		return "", nil, nil, false
 	}
@@ -612,6 +620,7 @@ func hasExplicitJSONName(tag *ast.BasicLit, hasJSON bool) bool {
 }
 
 func (s *parserState) schemaFromTypeExpr(pkg string, file *fileCtx, t ast.Expr) *model.Schema {
+	pkg, file = s.scopeForExpr(pkg, file, t)
 	switch n := t.(type) {
 	case *ast.Ident:
 		switch n.Name {

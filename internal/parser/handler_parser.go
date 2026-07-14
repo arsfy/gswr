@@ -368,6 +368,10 @@ func (s *parserState) collectInputParameterFromAssign(pkg string, file *fileCtx,
 		if schema == nil {
 			schema = &model.Schema{Type: "string"}
 		}
+		directSchema := &model.Schema{Type: "string"}
+		if isDirectParameterValue(rhs) {
+			directSchema = schema
+		}
 
 		directCalls := parameterCallsInExpr([]ast.Expr{rhs})
 		for _, call := range directCalls {
@@ -376,7 +380,7 @@ func (s *parserState) collectInputParameterFromAssign(pkg string, file *fileCtx,
 				In:          call.in,
 				Required:    call.required,
 				Description: desc,
-				Schema:      schema,
+				Schema:      directSchema,
 			})
 		}
 
@@ -392,6 +396,55 @@ func (s *parserState) collectInputParameterFromAssign(pkg string, file *fileCtx,
 			mergeParameter(params, p)
 		}
 	}
+}
+
+func isDirectParameterValue(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return isDirectParameterValue(n.X)
+	case *ast.IndexExpr:
+		_, ok := parseParameterIndex(n)
+		return ok
+	case *ast.CallExpr:
+		if _, ok := parseParameterCall(n); ok {
+			return true
+		}
+		if !isParameterConversionCall(n) {
+			return false
+		}
+		for _, arg := range n.Args {
+			switch value := arg.(type) {
+			case *ast.CallExpr:
+				if _, ok := parseParameterCall(value); ok {
+					return true
+				}
+			case *ast.IndexExpr:
+				if _, ok := parseParameterIndex(value); ok {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func isParameterConversionCall(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	if id, ok := call.Fun.(*ast.Ident); ok {
+		switch id.Name {
+		case "string", "bool", "int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "float32", "float64":
+			return true
+		}
+	}
+	if sel, _, ok := selectorFromCallFun(call.Fun); ok {
+		switch sel.Sel.Name {
+		case "Atoi", "ParseInt", "ParseUint", "ParseFloat", "ParseBool":
+			return true
+		}
+	}
+	return false
 }
 
 func (s *parserState) schemaFromAssignTarget(pkg string, file *fileCtx, st *ast.AssignStmt, rhsIdx int, varTypes map[string]ast.Expr) *model.Schema {
@@ -624,7 +677,10 @@ func resolveExprWithContext(expr ast.Expr, bindings map[string]ast.Expr, values 
 }
 
 func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr) (map[string]ast.Expr, map[string]ast.Expr) {
-	varTypes := map[string]ast.Expr{}
+	varTypes := mergeTypeMaps(contextTypes, nil)
+	if varTypes == nil {
+		varTypes = map[string]ast.Expr{}
+	}
 	varValues := map[string]ast.Expr{}
 	localTypes := map[string]ast.Expr{}
 	ast.Inspect(body, func(n ast.Node) bool {

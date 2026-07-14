@@ -272,6 +272,7 @@ func main() {
 	e := echo.New()
 	var db *client.Client
 	e.GET("/config", api.GetConfig(db))
+	e.GET("/records/:id", api.List(db))
 }
 `)
 	mustWriteFile(t, filepath.Join(root, "api", "routes.go"), `package api
@@ -295,6 +296,16 @@ func GetConfig(db *client.Client) echo.HandlerFunc {
 		})
 	}
 }
+
+func List(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		records, err := db.Records.Query(c.Param("id")).Where().OrderBy().Do()
+		if err != nil {
+			return err
+		}
+		return c.JSON(200, records)
+	}
+}
 `)
 	mustWriteFile(t, filepath.Join(root, "client", "client.go"), `package client
 
@@ -307,6 +318,24 @@ type Client struct {
 type RecordActions struct{}
 
 func (RecordActions) FindUnique() (*model.Record, error) {
+	return nil, nil
+}
+
+func (RecordActions) Query(id string) RecordQueryBuilder {
+	return RecordQueryBuilder{}
+}
+
+type RecordQueryBuilder struct{}
+
+func (RecordQueryBuilder) Where() RecordQueryBuilder {
+	return RecordQueryBuilder{}
+}
+
+func (RecordQueryBuilder) OrderBy() RecordQueryBuilder {
+	return RecordQueryBuilder{}
+}
+
+func (RecordQueryBuilder) Do() ([]model.Record, error) {
 	return nil, nil
 }
 `)
@@ -324,10 +353,28 @@ type Record struct {
 	if err != nil {
 		t.Fatalf("parse project: %v", err)
 	}
-	if len(ir.Routes) != 1 || len(ir.Routes[0].Responses) != 1 {
-		t.Fatalf("expected one route response, got %#v", ir.Routes)
+	if len(ir.Routes) != 2 {
+		t.Fatalf("expected two routes, got %#v", ir.Routes)
 	}
-	properties := ir.Routes[0].Responses[0].Schema.Properties
+	var configSchema, listSchema *model.Schema
+	for i := range ir.Routes {
+		if len(ir.Routes[i].Responses) == 0 {
+			continue
+		}
+		switch ir.Routes[i].Path {
+		case "/config":
+			configSchema = ir.Routes[i].Responses[0].Schema
+		case "/records/{id}":
+			listSchema = ir.Routes[i].Responses[0].Schema
+			if len(ir.Routes[i].Parameters) != 1 || ir.Routes[i].Parameters[0].Schema == nil || ir.Routes[i].Parameters[0].Schema.Type != "string" {
+				t.Fatalf("expected nested query path parameter to remain string, got %#v", ir.Routes[i].Parameters)
+			}
+		}
+	}
+	if configSchema == nil || listSchema == nil {
+		t.Fatalf("missing config or list schema: %#v", ir.Routes)
+	}
+	properties := configSchema.Properties
 	want := map[string]string{
 		"name":       "string",
 		"count":      "number",
@@ -338,6 +385,9 @@ type Record struct {
 		if properties[name] == nil || properties[name].Type != typ {
 			t.Fatalf("expected %s to be %s, got %#v", name, typ, properties[name])
 		}
+	}
+	if listSchema.Type != "array" || listSchema.Items == nil || listSchema.Items.Ref != "#/components/schemas/model_Record" {
+		t.Fatalf("expected staged method chain to return []model.Record, got %#v", listSchema)
 	}
 }
 
