@@ -13,7 +13,7 @@ func TestHandlerServesLiveOpenAPIAndSPA(t *testing.T) {
 	handler, err := NewHandler(func() ([]byte, error) {
 		calls++
 		return []byte("openapi: 3.0.3\nx-generated: " + strconv.Itoa(calls) + "\n"), nil
-	})
+	}, "v1.2.3")
 	if err != nil {
 		t.Fatalf("new handler: %v", err)
 	}
@@ -30,6 +30,15 @@ func TestHandlerServesLiveOpenAPIAndSPA(t *testing.T) {
 		if recorder.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("expected no-store cache header")
 		}
+	}
+
+	versionRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(versionRecorder, httptest.NewRequest(http.MethodGet, "/api/version", nil))
+	if versionRecorder.Code != http.StatusOK || versionRecorder.Body.String() != "{\"version\":\"v1.2.3\"}\n" {
+		t.Fatalf("unexpected version response: status %d body %q", versionRecorder.Code, versionRecorder.Body.String())
+	}
+	if versionRecorder.Header().Get("Content-Type") != "application/json; charset=utf-8" || versionRecorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected version headers: %#v", versionRecorder.Header())
 	}
 
 	recorder := httptest.NewRecorder()

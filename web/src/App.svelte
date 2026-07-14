@@ -3,8 +3,9 @@
   import { onMount } from 'svelte';
   import { GitFork, Loader2, Menu, X } from '@lucide/svelte';
   import {
-    loadOpenApi,
+    loadBackendVersion,
     groupOperationsByTag,
+    loadOpenApi,
     operationFromRoute,
     operationRoute,
     type OpenApiOperation,
@@ -18,6 +19,7 @@
   let selected = $state<OpenApiOperation | null>(null);
   let loaded = $state(false);
   let mobileMenuOpen = $state(false);
+  let backendVersion = $state('');
 
   const groups = $derived(spec ? groupOperationsByTag(spec) : []);
 
@@ -34,6 +36,10 @@
     }
 
     window.addEventListener('hashchange', handleHashChange);
+
+    loadBackendVersion()
+      .then((version) => (backendVersion = version))
+      .catch(() => {});
 
     loadOpenApi()
       .then((s) => {
@@ -92,7 +98,10 @@
             <div class="text-xs text-text-muted">{spec.info.version} · {groups.reduce((n, g) => n + g.operations.length, 0)} endpoints</div>
           {/if}
         </div>
-        <div class="rounded px-1 py-0.5 bg-gray-900 flex justify-center text-text-muted text-xs">Beta</div>
+        <div class="rounded px-1 py-0.5 bg-gray-900 flex justify-center text-text-muted text-xs">Beta {#if backendVersion}
+          {backendVersion}
+        {/if}</div>
+        
       </div>
       <div class="flex min-w-0 items-center gap-3">
         <a

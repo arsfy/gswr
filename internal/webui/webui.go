@@ -2,6 +2,7 @@ package webui
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -15,7 +16,7 @@ var embeddedAssets embed.FS
 
 type SpecGenerator func() ([]byte, error)
 
-func NewHandler(generate SpecGenerator) (http.Handler, error) {
+func NewHandler(generate SpecGenerator, version string) (http.Handler, error) {
 	if generate == nil {
 		return nil, fmt.Errorf("OpenAPI generator is required")
 	}
@@ -26,6 +27,10 @@ func NewHandler(generate SpecGenerator) (http.Handler, error) {
 	files := http.FileServer(http.FS(dist))
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/version" {
+			serveVersion(w, r, version)
+			return
+		}
 		if r.URL.Path == "/openapi.yaml" {
 			serveOpenAPI(w, r, generate)
 			return
@@ -44,6 +49,28 @@ func NewHandler(generate SpecGenerator) (http.Handler, error) {
 		fallback.URL.Path = "/"
 		files.ServeHTTP(w, fallback)
 	}), nil
+}
+
+func serveVersion(w http.ResponseWriter, r *http.Request, version string) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := json.Marshal(struct {
+		Version string `json:"version"`
+	}{Version: version})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data = append(data, '\n')
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	if r.Method == http.MethodGet {
+		_, _ = w.Write(data)
+	}
 }
 
 func serveOpenAPI(w http.ResponseWriter, r *http.Request, generate SpecGenerator) {

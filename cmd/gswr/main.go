@@ -130,7 +130,7 @@ func serveWeb(cmd *cobra.Command, root, entry string) error {
 	handler, err := webui.NewHandler(func() ([]byte, error) {
 		data, _, _, err := generateSpec()
 		return data, err
-	})
+	}, currentVersion())
 	if err != nil {
 		return fmt.Errorf("initialize web UI: %w", err)
 	}

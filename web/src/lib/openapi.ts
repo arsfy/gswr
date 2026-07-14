@@ -166,6 +166,13 @@ export async function loadOpenApi(url = '/openapi.yaml'): Promise<OpenApiSpec> {
   return normalizeSpec(raw);
 }
 
+export async function loadBackendVersion(url = '/api/version'): Promise<string> {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Failed to load backend version: ${res.status} ${res.statusText}`);
+  const data = (await res.json()) as { version?: unknown };
+  return typeof data.version === 'string' ? data.version : '';
+}
+
 export function getServerUrl(spec: OpenApiSpec): string {
   return spec.servers?.[0]?.url ?? '';
 }
