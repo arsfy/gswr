@@ -409,6 +409,93 @@ type Record struct {
 	}
 }
 
+func TestSSEResponseInfersMarshaledPayloadSchema(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "go.mod"), `module example.com/sse
+
+go 1.24
+`)
+	mustWriteFile(t, filepath.Join(root, "main.go"), `package main
+
+import (
+	"encoding/json"
+	"net/http"
+
+	"github.com/labstack/echo/v5"
+)
+
+type Task struct {
+	ID string `+"`json:\"id\"`"+`
+}
+
+func main() {
+	e := echo.New()
+	e.GET("/events", events())
+}
+
+func loadStatus() (map[string]any, error) {
+	count := 2
+	active := count > 0
+	recent := []Task{{ID: "one"}}
+	return map[string]any{
+		"state": "syncing",
+		"active": active,
+		"count": count,
+		"recent": recent,
+	}, nil
+}
+
+func events() echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		response := c.Response()
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.WriteHeader(http.StatusOK)
+		send := func() error {
+			snapshot, err := loadStatus()
+			if err != nil {
+				return err
+			}
+			encoded, err := json.Marshal(snapshot)
+			if err != nil {
+				return err
+			}
+			return writeSSEBytes(response, "sync_status", encoded)
+		}
+		return send()
+	}
+}
+
+func writeSSEBytes(response http.ResponseWriter, event string, data []byte) error {
+	return nil
+}
+`)
+
+	ir, err := parser.ParseEchoProject(filepath.Join(root, "main.go"))
+	if err != nil {
+		t.Fatalf("parse project: %v", err)
+	}
+	if len(ir.Routes) != 1 || len(ir.Routes[0].Responses) != 1 {
+		t.Fatalf("expected one SSE response, got %#v", ir.Routes)
+	}
+	resp := ir.Routes[0].Responses[0]
+	if resp.StatusCode != http.StatusOK || resp.ContentType != "text/event-stream" {
+		t.Fatalf("expected 200 text/event-stream response, got %#v", resp)
+	}
+	if resp.Schema == nil || resp.Schema.Type != "object" {
+		t.Fatalf("expected SSE object payload, got %#v", resp.Schema)
+	}
+	want := map[string]string{"state": "string", "active": "boolean", "count": "number", "recent": "array"}
+	for name, typ := range want {
+		if field := resp.Schema.Properties[name]; field == nil || field.Type != typ {
+			t.Fatalf("expected SSE field %s to be %s, got %#v", name, typ, field)
+		}
+	}
+	recent := resp.Schema.Properties["recent"]
+	if recent.Items == nil || recent.Items.Ref != "#/components/schemas/Task" {
+		t.Fatalf("expected typed SSE recent items, got %#v", recent)
+	}
+}
+
 func TestAssignmentRHSDoesNotExpandRecursiveRouterCalls(t *testing.T) {
 	root := t.TempDir()
 	mustWriteFile(t, filepath.Join(root, "go.mod"), "module example.com/recursive\n\ngo 1.24\n")

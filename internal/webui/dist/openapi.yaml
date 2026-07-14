@@ -96,8 +96,6 @@ paths:
                                         properties:
                                             uid:
                                                 type: string
-                                        required:
-                                            - uid
     /api/v1/auth/register:
         post:
             operationId: register
@@ -176,9 +174,7 @@ paths:
                                         type: object
                                         properties:
                                             enabled:
-                                                type: object
-                                        required:
-                                            - enabled
+                                                type: boolean
     /api/v1/clusters:
         get:
             operationId: listAvailable
@@ -213,11 +209,7 @@ paths:
                                             requires_cluster:
                                                 type: boolean
                                             selected_cluster_id:
-                                                type: object
-                                        required:
-                                            - clusters
-                                            - requires_cluster
-                                            - selected_cluster_id
+                                                type: string
         post:
             operationId: create
             summary: Create cluster
@@ -255,11 +247,21 @@ paths:
                                         properties:
                                             cluster:
                                                 type: object
+                                                properties:
+                                                    created_at:
+                                                        type: string
+                                                        format: date-time
+                                                        example: "2026-01-02T15:04:05Z"
+                                                    id:
+                                                        type: string
+                                                    name:
+                                                        type: string
+                                                    role:
+                                                        type: string
+                                                        enum:
+                                                            - OWNER
                                             selected_cluster_id:
-                                                type: object
-                                        required:
-                                            - cluster
-                                            - selected_cluster_id
+                                                type: string
     /api/v1/clusters/{cluster_id}/analytics/distributions/{dimension}:
         get:
             operationId: ranking
@@ -277,16 +279,12 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: dimension
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: limit
                   in: query
                   schema:
@@ -298,9 +296,7 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: sort
                   in: query
                   schema:
@@ -318,7 +314,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_DistributionItem'
     /api/v1/clusters/{cluster_id}/analytics/nodes/runtime:
         get:
             operationId: nodeRuntime
@@ -336,15 +334,11 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                    type: string
                 - name: node_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                    type: string
                 - name: period
                   in: query
                   schema:
@@ -370,9 +364,6 @@ paths:
                                                 type: array
                                                 items:
                                                     $ref: '#/components/schemas/analytics_NodeRuntimePoint'
-                                        required:
-                                            - period
-                                            - series
     /api/v1/clusters/{cluster_id}/analytics/rankings/{dimension}:
         get:
             operationId: ranking
@@ -390,16 +381,12 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: dimension
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: limit
                   in: query
                   schema:
@@ -411,9 +398,7 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_DistributionItem'
+                    type: string
                 - name: sort
                   in: query
                   schema:
@@ -431,7 +416,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_DistributionItem'
     /api/v1/clusters/{cluster_id}/analytics/summary:
         get:
             operationId: summary
@@ -479,7 +466,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        $ref: '#/components/schemas/analytics_Summary'
     /api/v1/clusters/{cluster_id}/analytics/top-ips:
         get:
             operationId: top
@@ -497,9 +484,7 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TopItem'
+                    type: string
                 - name: from
                   in: query
                   schema:
@@ -513,9 +498,7 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TopItem'
+                    type: string
                 - name: to
                   in: query
                   schema:
@@ -535,7 +518,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_TopItem'
     /api/v1/clusters/{cluster_id}/analytics/top-urls:
         get:
             operationId: top
@@ -553,9 +538,7 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TopItem'
+                    type: string
                 - name: from
                   in: query
                   schema:
@@ -569,9 +552,7 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TopItem'
+                    type: string
                 - name: to
                   in: query
                   schema:
@@ -591,7 +572,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_TopItem'
     /api/v1/clusters/{cluster_id}/analytics/traffic:
         get:
             operationId: traffic
@@ -609,9 +592,7 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TrafficPoint'
+                    type: string
                 - name: period
                   in: query
                   schema:
@@ -619,9 +600,7 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/analytics_TrafficPoint'
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -638,17 +617,13 @@ paths:
                                         type: object
                                         properties:
                                             granularity:
-                                                type: object
+                                                type: string
                                             period:
                                                 type: string
                                             series:
                                                 type: array
                                                 items:
                                                     $ref: '#/components/schemas/analytics_TrafficPoint'
-                                        required:
-                                            - granularity
-                                            - period
-                                            - series
     /api/v1/clusters/{cluster_id}/certificates:
         get:
             operationId: list
@@ -681,7 +656,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_Certificate'
         post:
             operationId: upload
             summary: Upload certificate
@@ -727,6 +704,25 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            expires_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            fingerprint:
+                                                type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
     /api/v1/clusters/{cluster_id}/dns:
         get:
             operationId: getConfig
@@ -759,38 +755,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
-                                        properties:
-                                            primary_hostname:
-                                                type: string
-                                            provider:
-                                                type: object
-                                                properties:
-                                                    credentials_configured:
-                                                        type: boolean
-                                                    default_ttl:
-                                                        type: number
-                                                    enabled:
-                                                        type: boolean
-                                                    proxied:
-                                                        type: boolean
-                                                    type:
-                                                        $ref: '#/components/schemas/model_DNSProviderType'
-                                                    zone:
-                                                        type: string
-                                                    zone_id:
-                                                        type: string
-                                                required:
-                                                    - credentials_configured
-                                                    - default_ttl
-                                                    - enabled
-                                                    - proxied
-                                                    - type
-                                                    - zone
-                                                    - zone_id
-                                        required:
-                                            - primary_hostname
-                                            - provider
+                                        $ref: '#/components/schemas/types_DNSConfig'
         put:
             operationId: updateConfig
             summary: Update DNS config
@@ -912,7 +877,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_DNSLine'
     /api/v1/clusters/{cluster_id}/dns/jobs:
         get:
             operationId: listJobs
@@ -993,7 +960,14 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        $ref: '#/components/schemas/model_DNSLine'
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            providerCode:
+                                                type: string
     /api/v1/clusters/{cluster_id}/dns/lines/{line_id}:
         delete:
             operationId: deleteLine
@@ -1017,7 +991,7 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: object
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -1062,7 +1036,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_DNSRecord'
     /api/v1/clusters/{cluster_id}/dns/sync:
         post:
             operationId: syncNow
@@ -1128,7 +1104,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_ClusterGroup'
         post:
             operationId: createGroup
             summary: Create group
@@ -1170,6 +1148,11 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
     /api/v1/clusters/{cluster_id}/members:
         post:
             operationId: addMember
@@ -1214,6 +1197,17 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            cluster_id:
+                                                type: string
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            permission:
+                                                $ref: '#/components/schemas/model_ClusterPermission'
+                                            user_id:
+                                                type: string
     /api/v1/clusters/{cluster_id}/nodes:
         get:
             operationId: list
@@ -1246,7 +1240,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_Node'
         post:
             operationId: create
             summary: Create node
@@ -1304,14 +1300,11 @@ paths:
                                         type: object
                                         properties:
                                             id:
-                                                type: object
+                                                type: string
                                             status:
                                                 type: string
                                                 enum:
                                                     - PENDING
-                                        required:
-                                            - id
-                                            - status
     /api/v1/clusters/{cluster_id}/nodes/{node_id}:
         get:
             operationId: get
@@ -1349,7 +1342,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        $ref: '#/components/schemas/types_Node'
         delete:
             operationId: deleteNode
             summary: Delete node
@@ -1434,6 +1427,13 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            address:
+                                                type: string
+                                            id:
+                                                type: string
+                                            primary:
+                                                type: boolean
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/cache-config:
         get:
             operationId: getCacheConfig
@@ -1471,7 +1471,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        $ref: '#/components/schemas/types_NodeCacheConfig'
         put:
             operationId: updateCacheConfig
             summary: Update node cache config
@@ -1526,14 +1526,9 @@ paths:
                                         type: object
                                         properties:
                                             cache_config:
-                                                type: object
+                                                $ref: '#/components/schemas/types_NodeCacheConfig'
                                             synced:
                                                 type: boolean
-                                                enum:
-                                                    - false
-                                        required:
-                                            - cache_config
-                                            - synced
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/disable:
         post:
             operationId: disableNode
@@ -1579,9 +1574,6 @@ paths:
                                                 type: string
                                                 enum:
                                                     - DISABLED
-                                        required:
-                                            - id
-                                            - status
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/dns-lines:
         put:
             operationId: updateDNSLines
@@ -1638,9 +1630,6 @@ paths:
                                                     type: string
                                             node_id:
                                                 type: string
-                                        required:
-                                            - dns_line_ids
-                                            - node_id
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/enable:
         post:
             operationId: enableNode
@@ -1690,10 +1679,6 @@ paths:
                                                 type: string
                                                 enum:
                                                     - OFFLINE
-                                        required:
-                                            - id
-                                            - message
-                                            - status
     /api/v1/clusters/{cluster_id}/publish/events:
         get:
             operationId: clusterEvents
@@ -1717,9 +1702,26 @@ paths:
                 "200":
                     description: OK
                     content:
-                        application/json:
+                        text/event-stream:
                             schema:
                                 type: object
+                                properties:
+                                    failed_count:
+                                        type: number
+                                    has_active_tasks:
+                                        type: boolean
+                                    has_failed_tasks:
+                                        type: boolean
+                                    pending_count:
+                                        type: number
+                                    recent_tasks:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_PublishJob'
+                                    running_count:
+                                        type: number
+                                    state:
+                                        type: string
     /api/v1/clusters/{cluster_id}/publish/status:
         get:
             operationId: clusterStatus
@@ -1753,8 +1755,23 @@ paths:
                                             - ok
                                     data:
                                         type: object
-                                        additionalProperties:
-                                            type: object
+                                        properties:
+                                            failed_count:
+                                                type: number
+                                            has_active_tasks:
+                                                type: boolean
+                                            has_failed_tasks:
+                                                type: boolean
+                                            pending_count:
+                                                type: number
+                                            recent_tasks:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/types_PublishJob'
+                                            running_count:
+                                                type: number
+                                            state:
+                                                type: string
     /api/v1/clusters/{cluster_id}/regions:
         get:
             operationId: listRegions
@@ -1787,7 +1804,9 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_ClusterRegion'
         post:
             operationId: createRegion
             summary: Create region
@@ -1829,6 +1848,11 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
     /api/v1/clusters/{cluster_id}/sites:
         post:
             operationId: create
@@ -1885,17 +1909,13 @@ paths:
                                         type: object
                                         properties:
                                             id:
-                                                type: object
+                                                type: string
                                             name:
                                                 type: string
                                             status:
                                                 type: string
                                                 enum:
                                                     - ACTIVE
-                                        required:
-                                            - id
-                                            - name
-                                            - status
     /api/v1/clusters/{cluster_id}/sites/{site_id}/cache:
         get:
             operationId: getCache
@@ -2071,8 +2091,6 @@ paths:
                                         properties:
                                             cache:
                                                 $ref: '#/components/schemas/policy_CachePolicy'
-                                        required:
-                                            - cache
     /api/v1/clusters/{cluster_id}/sites/{site_id}/listener:
         get:
             operationId: getListener
@@ -2111,6 +2129,33 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            hsts_enabled:
+                                                type: boolean
+                                            hsts_include_subdomains:
+                                                type: boolean
+                                            hsts_max_age:
+                                                type: number
+                                            hsts_preload:
+                                                type: boolean
+                                            http_enabled:
+                                                type: boolean
+                                            http_port:
+                                                type: number
+                                            http2_enabled:
+                                                type: boolean
+                                            http3_enabled:
+                                                type: boolean
+                                            https_enabled:
+                                                type: boolean
+                                            https_port:
+                                                type: number
+                                            ocsp_stapling_enabled:
+                                                type: boolean
+                                            redirect_http_to_https:
+                                                type: boolean
+                                            tls_min_version:
+                                                $ref: '#/components/schemas/model_TLSMinVersion'
         patch:
             operationId: updateListener
             summary: Update site listener
@@ -2184,8 +2229,33 @@ paths:
                                         properties:
                                             listener:
                                                 type: object
-                                        required:
-                                            - listener
+                                                properties:
+                                                    hsts_enabled:
+                                                        type: boolean
+                                                    hsts_include_subdomains:
+                                                        type: boolean
+                                                    hsts_max_age:
+                                                        type: number
+                                                    hsts_preload:
+                                                        type: boolean
+                                                    http_enabled:
+                                                        type: boolean
+                                                    http_port:
+                                                        type: number
+                                                    http2_enabled:
+                                                        type: boolean
+                                                    http3_enabled:
+                                                        type: boolean
+                                                    https_enabled:
+                                                        type: boolean
+                                                    https_port:
+                                                        type: number
+                                                    ocsp_stapling_enabled:
+                                                        type: boolean
+                                                    redirect_http_to_https:
+                                                        type: boolean
+                                                    tls_min_version:
+                                                        $ref: '#/components/schemas/model_TLSMinVersion'
     /api/v1/clusters/{cluster_id}/sites/{site_id}/publish:
         get:
             operationId: listJobs
@@ -2261,6 +2331,23 @@ paths:
                                             - ok
                                     data:
                                         type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            site_id:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            version:
+                                                type: number
     /api/v1/clusters/{cluster_id}/sites/{site_id}/publish/{job_id}:
         get:
             operationId: getJob
@@ -2304,8 +2391,23 @@ paths:
                                             - ok
                                     data:
                                         type: object
-                                        additionalProperties:
-                                            type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            site_id:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            version:
+                                                type: number
     /api/v1/clusters/{cluster_id}/sites/{site_id}/purge:
         get:
             operationId: list
@@ -2392,8 +2494,25 @@ paths:
                                             - ok
                                     data:
                                         type: object
-                                        additionalProperties:
-                                            type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            site_id:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            type:
+                                                $ref: '#/components/schemas/model_PurgeType'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            value:
+                                                type: string
     /api/v1/clusters/{cluster_id}/sites/{site_id}/purge/{job_id}:
         get:
             operationId: get
@@ -2437,8 +2556,25 @@ paths:
                                             - ok
                                     data:
                                         type: object
-                                        additionalProperties:
-                                            type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            site_id:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            type:
+                                                $ref: '#/components/schemas/model_PurgeType'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            value:
+                                                type: string
     /api/v1/session/cluster:
         put:
             operationId: selectCurrent
@@ -2477,8 +2613,6 @@ paths:
                                         properties:
                                             selected_cluster_id:
                                                 type: string
-                                        required:
-                                            - selected_cluster_id
     /health/live:
         get:
             operationId: live
@@ -2509,8 +2643,6 @@ paths:
                                                 type: string
                                                 enum:
                                                     - ok
-                                        required:
-                                            - status
     /health/ready:
         get:
             operationId: ready
@@ -2541,8 +2673,6 @@ paths:
                                                 type: string
                                                 enum:
                                                     - ok
-                                        required:
-                                            - status
                 "503":
                     description: Server Error
                     content:
@@ -2631,6 +2761,20 @@ components:
                     type: number
                 requests:
                     type: number
+        auth_captchaPublicResponse:
+            type: object
+            properties:
+                provider:
+                    type: string
+                site_key:
+                    type: string
+        auth_registrationConfigResponse:
+            type: object
+            properties:
+                captcha:
+                    $ref: '#/components/schemas/auth_captchaPublicResponse'
+                enabled:
+                    type: boolean
         clusters_clusterChoice:
             type: object
             properties:
@@ -3513,6 +3657,15 @@ components:
                     type: string
                 user:
                     type: string
+        nodes_cacheUpdateResponse:
+            type: object
+            properties:
+                cache_config:
+                    $ref: '#/components/schemas/types_NodeCacheConfig'
+                sync_error:
+                    type: string
+                synced:
+                    type: boolean
         policy_CacheConditionGroup:
             type: object
             properties:
@@ -3586,6 +3739,25 @@ components:
                     type: object
                     additionalProperties:
                         type: number
+        publish_clusterPublishStatus:
+            type: object
+            properties:
+                failed_count:
+                    type: number
+                has_active_tasks:
+                    type: boolean
+                has_failed_tasks:
+                    type: boolean
+                pending_count:
+                    type: number
+                recent_tasks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_PublishJob'
+                running_count:
+                    type: number
+                state:
+                    type: string
         query_NodeCacheConfigSetClause:
             type: object
             properties:
@@ -3600,6 +3772,48 @@ components:
                     type: string
                 value:
                     type: object
+        settings_CaptchaConfig:
+            type: object
+            properties:
+                provider:
+                    type: string
+                secret_key:
+                    type: string
+                site_key:
+                    type: string
+        sites_cacheUpdateResponse:
+            type: object
+            properties:
+                cache:
+                    $ref: '#/components/schemas/policy_CachePolicy'
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
+        sites_createResponse:
+            type: object
+            properties:
+                dns_sync_job:
+                    $ref: '#/components/schemas/types_DNSJob'
+                id:
+                    type: string
+                name:
+                    type: string
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+        sites_listenerUpdateResponse:
+            type: object
+            properties:
+                listener:
+                    $ref: '#/components/schemas/types_SiteListener'
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
         sites_originInput:
             type: object
             properties:
@@ -3611,6 +3825,48 @@ components:
                     $ref: '#/components/schemas/model_OriginProtocol'
                 weight:
                     type: number
+        types_Certificate:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                expires_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                fingerprint:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        types_ClusterGroup:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+        types_ClusterRegion:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+        types_DNSConfig:
+            type: object
+            properties:
+                primary_hostname:
+                    type: string
+                provider:
+                    $ref: '#/components/schemas/types_DNSProviderConfig'
         types_DNSJob:
             type: object
             properties:
@@ -3635,6 +3891,185 @@ components:
             properties:
                 error:
                     type: string
+        types_DNSLine:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                providerCode:
+                    type: string
+        types_DNSProviderConfig:
+            type: object
+            properties:
+                credentials_configured:
+                    type: boolean
+                default_ttl:
+                    type: number
+                enabled:
+                    type: boolean
+                proxied:
+                    type: boolean
+                type:
+                    $ref: '#/components/schemas/model_DNSProviderType'
+                zone:
+                    type: string
+                zone_id:
+                    type: string
+        types_DNSRecord:
+            type: object
+            properties:
+                dnsLineId:
+                    type: string
+                dnsLineKey:
+                    type: string
+                hostname:
+                    type: string
+                id:
+                    type: string
+                lastError:
+                    type: string
+                lastSyncedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                providerRecordId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_DNSRecordStatus'
+                type:
+                    $ref: '#/components/schemas/model_DNSRecordType'
+                value:
+                    type: string
+        types_Node:
+            type: object
+            properties:
+                addresses:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_NodeAddress'
+                cacheConfig:
+                    $ref: '#/components/schemas/types_NodeCacheConfig'
+                dnsLines:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_NodeDNSLine'
+                id:
+                    type: string
+                name:
+                    type: string
+                siteConfigVersions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_SiteConfigVersion'
+                status:
+                    $ref: '#/components/schemas/model_NodeStatus'
+        types_NodeAddress:
+            type: object
+            properties:
+                address:
+                    type: string
+                id:
+                    type: string
+                primary:
+                    type: boolean
+        types_NodeCacheConfig:
+            type: object
+            properties:
+                auto_max_size:
+                    type: boolean
+                cache_directory:
+                    type: string
+                max_disk_usage_percent:
+                    type: number
+                max_size_bytes:
+                    type: number
+        types_NodeDNSLine:
+            type: object
+            properties:
+                dnsLineId:
+                    type: string
+                nodeId:
+                    type: string
+        types_PublishJob:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                site_id:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
+        types_PurgeJob:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                site_id:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                type:
+                    $ref: '#/components/schemas/model_PurgeType'
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                value:
+                    type: string
+        types_SiteConfigVersion:
+            type: object
+            properties:
+                site_id:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                version:
+                    type: number
+        types_SiteListener:
+            type: object
+            properties:
+                hsts_enabled:
+                    type: boolean
+                hsts_include_subdomains:
+                    type: boolean
+                hsts_max_age:
+                    type: number
+                hsts_preload:
+                    type: boolean
+                http_enabled:
+                    type: boolean
+                http_port:
+                    type: number
+                http2_enabled:
+                    type: boolean
+                http3_enabled:
+                    type: boolean
+                https_enabled:
+                    type: boolean
+                https_port:
+                    type: number
+                ocsp_stapling_enabled:
+                    type: boolean
+                redirect_http_to_https:
+                    type: boolean
+                tls_min_version:
+                    $ref: '#/components/schemas/model_TLSMinVersion'
     securitySchemes:
         cookie_session:
             type: apiKey

@@ -190,6 +190,24 @@ export function getJsonSchema(
   return jsonMediaType ? (content[jsonMediaType]?.schema ?? null) : null;
 }
 
+export function getResponseContent(
+  content: Record<string, { schema?: Record<string, unknown> }> | undefined,
+): { mediaType: string; schema: Record<string, unknown> } | null {
+  if (!content) return null;
+
+  const entries = Object.entries(content).filter(
+    (entry): entry is [string, { schema: Record<string, unknown> }] => entry[1]?.schema !== undefined,
+  );
+  if (entries.length === 0) return null;
+
+  const preferred = entries.find(([mediaType]) => {
+    const normalized = mediaType.split(';', 1)[0].trim().toLowerCase();
+    return normalized === 'application/json' || normalized.endsWith('+json');
+  });
+  const [mediaType, value] = preferred ?? entries[0];
+  return { mediaType, schema: value.schema };
+}
+
 export function resolveSchemaRef(
   schema: Record<string, unknown>,
   schemas: Record<string, Record<string, unknown>> = {},

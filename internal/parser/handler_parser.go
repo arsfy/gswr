@@ -19,11 +19,107 @@ func (s *parserState) parseHandlerSemantics(pkg string, file *fileCtx, body *ast
 
 	varTypes, varValues := s.collectVarContext(pkg, file, body, contextTypes)
 	result.responses = s.parseHandlerResponses(pkg, file, body, varTypes, varValues)
+	if sse := s.parseSSEResponse(pkg, file, body, contextTypes); sse != nil {
+		result.responses = []model.Response{*sse}
+	}
 	result.parameters, result.requestBody = s.parseHandlerInputs(pkg, file, body, varTypes)
 	for _, p := range inheritedParams {
 		mergeParameterIntoSlice(&result.parameters, p)
 	}
 	return result
+}
+
+func (s *parserState) parseSSEResponse(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr) *model.Response {
+	if body == nil {
+		return nil
+	}
+	contentType := ""
+	statusCode := 200
+	ast.Inspect(body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name == "Set" && len(call.Args) >= 2 {
+			name, nameOK := stringLiteral(call.Args[0])
+			value, valueOK := stringLiteral(call.Args[1])
+			if nameOK && valueOK && strings.EqualFold(name, "Content-Type") && strings.EqualFold(value, "text/event-stream") {
+				contentType = value
+			}
+		}
+		if sel.Sel.Name == "WriteHeader" && len(call.Args) == 1 {
+			if code, ok := resolveStatusCode(call.Args[0], nil, map[string]bool{}); ok {
+				statusCode = code
+			}
+		}
+		return true
+	})
+	if contentType == "" {
+		return nil
+	}
+
+	varTypes, varValues := s.collectVarContextMode(pkg, file, body, contextTypes, true)
+	var best *model.Schema
+	ast.Inspect(body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) < 3 {
+			return true
+		}
+		name := callExprName(call.Fun)
+		if name != "writeSSE" && name != "writeSSEBytes" {
+			return true
+		}
+		if event, ok := stringLiteral(call.Args[1]); ok && event == "error" {
+			return true
+		}
+		payload := unwrapSSEPayload(call.Args[2], file, varValues)
+		candidate := s.schemaFromExprWithVars(pkg, file, payload, varTypes)
+		if schemaHasConcreteShape(candidate) {
+			best = candidate
+			return false
+		}
+		if best == nil {
+			best = candidate
+		}
+		return true
+	})
+	if best == nil {
+		best = &model.Schema{Type: "object"}
+	}
+	return &model.Response{
+		StatusCode:  statusCode,
+		Description: responseDescription(statusCode),
+		ContentType: contentType,
+		Schema:      best,
+	}
+}
+
+func callExprName(fun ast.Expr) string {
+	switch n := fun.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.SelectorExpr:
+		return n.Sel.Name
+	default:
+		return ""
+	}
+}
+
+func unwrapSSEPayload(expr ast.Expr, file *fileCtx, values map[string]ast.Expr) ast.Expr {
+	resolved := resolveExprWithContext(expr, nil, values, map[string]bool{})
+	call, ok := resolved.(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return resolved
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if ok && sel.Sel.Name == "Marshal" && isSelectorFromImport(file, sel, "encoding/json") {
+		return resolveExprWithContext(call.Args[0], nil, values, map[string]bool{})
+	}
+	return resolved
 }
 
 func (s *parserState) parseHandlerResponses(pkg string, file *fileCtx, body *ast.BlockStmt, varTypes map[string]ast.Expr, varValues map[string]ast.Expr) []model.Response {
@@ -677,6 +773,10 @@ func resolveExprWithContext(expr ast.Expr, bindings map[string]ast.Expr, values 
 }
 
 func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr) (map[string]ast.Expr, map[string]ast.Expr) {
+	return s.collectVarContextMode(pkg, file, body, contextTypes, false)
+}
+
+func (s *parserState) collectVarContextMode(pkg string, file *fileCtx, body *ast.BlockStmt, contextTypes map[string]ast.Expr, includeFuncLits bool) (map[string]ast.Expr, map[string]ast.Expr) {
 	varTypes := mergeTypeMaps(contextTypes, nil)
 	if varTypes == nil {
 		varTypes = map[string]ast.Expr{}
@@ -684,7 +784,7 @@ func (s *parserState) collectVarContext(pkg string, file *fileCtx, body *ast.Blo
 	varValues := map[string]ast.Expr{}
 	localTypes := map[string]ast.Expr{}
 	ast.Inspect(body, func(n ast.Node) bool {
-		if _, ok := n.(*ast.FuncLit); ok {
+		if _, ok := n.(*ast.FuncLit); ok && !includeFuncLits {
 			return false
 		}
 		switch x := n.(type) {
@@ -1195,6 +1295,15 @@ func (s *parserState) resolveStructType(pkg string, file *fileCtx, typeExpr ast.
 
 func inferTypeFromExprWithContext(expr ast.Expr, contextTypes map[string]ast.Expr) (ast.Expr, bool) {
 	switch n := expr.(type) {
+	case *ast.BasicLit:
+		switch n.Kind {
+		case token.STRING:
+			return ast.NewIdent("string"), true
+		case token.INT:
+			return ast.NewIdent("int64"), true
+		case token.FLOAT:
+			return ast.NewIdent("float64"), true
+		}
 	case *ast.CompositeLit:
 		return n.Type, true
 	case *ast.Ident:
@@ -1232,6 +1341,11 @@ func inferTypeFromExprWithContext(expr ast.Expr, contextTypes map[string]ast.Exp
 	case *ast.IndexExpr:
 		if t, ok := inferTypeFromQueryParamsIndex(n); ok {
 			return t, true
+		}
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case token.EQL, token.NEQ, token.LSS, token.LEQ, token.GTR, token.GEQ, token.LAND, token.LOR:
+			return ast.NewIdent("bool"), true
 		}
 	}
 	return nil, false

@@ -153,22 +153,27 @@ func (s *parserState) schemaFromCallResult(pkg string, file *fileCtx, call *ast.
 			argIdx++
 		}
 	}
+	calleeContextTypes := mergeTypeMaps(varTypes, functionParameterTypes(fm.decl))
+	calleeVarTypes, _ := s.collectVarContext(fm.pkg, fm.file, fm.decl.Body, calleeContextTypes)
 
 	var result *model.Schema
 	ast.Inspect(fm.decl.Body, func(node ast.Node) bool {
-		if result != nil {
+		if schemaHasConcreteShape(result) {
 			return false
 		}
 		if _, ok := node.(*ast.FuncLit); ok {
 			return false
 		}
 		ret, ok := node.(*ast.ReturnStmt)
-		if !ok || len(ret.Results) != 1 {
+		if !ok || len(ret.Results) == 0 {
 			return true
 		}
 		expr := resolveExprWithContext(ret.Results[0], localBindings, nil, map[string]bool{})
-		result = s.schemaFromExprWithVarsAndBindings(fm.pkg, fm.file, expr, varTypes, localBindings)
-		return result == nil
+		candidate := s.schemaFromExprWithVarsAndBindings(fm.pkg, fm.file, expr, calleeVarTypes, localBindings)
+		if schemaHasConcreteShape(candidate) || result == nil {
+			result = candidate
+		}
+		return !schemaHasConcreteShape(result)
 	})
 	return result
 }

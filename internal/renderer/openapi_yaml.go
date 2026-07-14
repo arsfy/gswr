@@ -87,9 +87,7 @@ type response struct {
 	Content     *contentType `yaml:"content,omitempty" json:"content,omitempty"`
 }
 
-type contentType struct {
-	ApplicationJSON mediaType `yaml:"application/json" json:"application/json"`
-}
+type contentType map[string]mediaType
 
 type mediaType struct {
 	Schema schemaObject `yaml:"schema" json:"schema"`
@@ -195,15 +193,19 @@ func buildDoc(ir *model.IR) openAPIDoc {
 			if desc == "" {
 				desc = "Response"
 			}
+			contentTypeName := rr.ContentType
+			if contentTypeName == "" {
+				contentTypeName = "application/json"
+			}
 			opResponses[itoaOrDefault(rr.StatusCode)] = response{
 				Description: desc,
-				Content:     &contentType{ApplicationJSON: mediaType{Schema: toSchema(respSchema)}},
+				Content:     &contentType{contentTypeName: {Schema: toSchema(respSchema)}},
 			}
 		}
 		if len(opResponses) == 0 {
 			opResponses["200"] = response{
 				Description: "OK",
-				Content:     &contentType{ApplicationJSON: mediaType{Schema: toSchema(model.Schema{Type: "object"})}},
+				Content:     &contentType{"application/json": {Schema: toSchema(model.Schema{Type: "object"})}},
 			}
 		}
 		op := &operation{
@@ -240,7 +242,7 @@ func buildDoc(ir *model.IR) openAPIDoc {
 		if r.RequestBody != nil {
 			op.RequestBody = &requestBodyObject{
 				Required: true,
-				Content:  contentType{ApplicationJSON: mediaType{Schema: toSchema(*r.RequestBody)}},
+				Content:  contentType{"application/json": {Schema: toSchema(*r.RequestBody)}},
 			}
 		}
 

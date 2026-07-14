@@ -6,6 +6,7 @@
     displaySummary,
     getServerUrl,
     getJsonSchema,
+    getResponseContent,
     joinServerUrl,
     resolveSchemaRef,
   } from '../openapi';
@@ -35,7 +36,8 @@
       : defaultResponseCode(operation.responses),
   );
   const activeResponse = $derived(operation.responses?.[activeResponseTab]);
-  const activeResponseSchema = $derived(responseSchema(activeResponseTab));
+  const activeResponseContent = $derived(responseContent(activeResponseTab));
+  const activeResponseSchema = $derived(activeResponseContent?.schema ?? null);
   const activeResponseExample = $derived(
     activeResponseSchema ? JSON.stringify(exampleValue(activeResponseSchema), null, 2) : null,
   );
@@ -59,10 +61,10 @@
     return getJsonSchema(operation.requestBody?.content);
   }
 
-  function responseSchema(code: string): Record<string, unknown> | null {
+  function responseContent(code: string): { mediaType: string; schema: Record<string, unknown> } | null {
     const response = operation.responses?.[code];
     if (!response) return null;
-    return getJsonSchema(response.content);
+    return getResponseContent(response.content);
   }
 
   function exampleValue(schema: Record<string, unknown> | null, seen = new Set<string>()): unknown {
@@ -304,7 +306,7 @@
             {#if activeResponseSchema}
               <div class="rounded-lg border border-border overflow-hidden mb-4">
                 <div class="px-3 py-2 border-b border-border bg-surface-inset text-xs font-medium text-text-muted">
-                  application/json
+                  {activeResponseContent?.mediaType}
                 </div>
                 <JsonPreview value={activeResponseExample ?? ''} />
               </div>

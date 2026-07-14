@@ -18,6 +18,7 @@ type Route struct {
 type Response struct {
 	StatusCode  int
 	Description string
+	ContentType string
 	Schema      *Schema
 }
 
