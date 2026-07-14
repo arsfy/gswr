@@ -1,4 +1,4 @@
-# GoSemRoute
+# GoSemRoute (gswr)
 
 ![Golang](https://img.shields.io/badge/-Golang%201.26-17333d?style=flat-square&logo=go&logoColor=white)
 ![OpenAPI](https://img.shields.io/badge/-OpenAPI%203-2e6614?style=flat-square)
@@ -19,6 +19,12 @@ It walks routing code, follows helper wrappers, and infers request/response sche
 
 > This tool is optimized for real internal codebases, but it is still static analysis.  
 > If you hit unsupported patterns, open an issue with a minimal code sample.
+
+## Web API reference UI
+
+Use the `gswr web` command in the project root directory to start an embedded API reference UI.
+
+<img alt="web" src="https://github.com/user-attachments/assets/b3da991f-f2b8-446f-898d-a3ee6f176874" />
 
 ## Quick Start
 
