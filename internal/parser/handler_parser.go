@@ -842,6 +842,11 @@ func (s *parserState) resolveMethodCallee(pkg string, file *fileCtx, fun ast.Exp
 	if receiverName == "" {
 		return nil
 	}
+	if importPath := receiverTypeImportPath(receiverFile, receiverExpr); importPath != "" {
+		if methods := s.methodsByImportPath[importPath][receiverName]; methods != nil {
+			return methods[sel.Sel.Name]
+		}
+	}
 	if methods := s.methodsByImportPath[receiverFile.importPath][receiverName]; methods != nil {
 		return methods[sel.Sel.Name]
 	}
@@ -851,6 +856,27 @@ func (s *parserState) resolveMethodCallee(pkg string, file *fileCtx, fun ast.Exp
 		}
 	}
 	return nil
+}
+
+func receiverTypeImportPath(file *fileCtx, expr ast.Expr) string {
+	if file == nil {
+		return ""
+	}
+	switch n := expr.(type) {
+	case *ast.StarExpr:
+		return receiverTypeImportPath(file, n.X)
+	case *ast.IndexExpr:
+		return receiverTypeImportPath(file, n.X)
+	case *ast.IndexListExpr:
+		return receiverTypeImportPath(file, n.X)
+	case *ast.SelectorExpr:
+		if alias, ok := n.X.(*ast.Ident); ok {
+			return file.imports[alias.Name]
+		}
+	case *ast.Ident:
+		return file.importPath
+	}
+	return ""
 }
 
 func typeExprName(expr ast.Expr) string {

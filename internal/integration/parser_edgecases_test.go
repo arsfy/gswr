@@ -271,8 +271,9 @@ import (
 func main() {
 	e := echo.New()
 	var db *client.Client
+	var session *client.Session
 	e.GET("/config", api.GetConfig(db))
-	e.GET("/records/:id", api.List(db))
+	e.GET("/records/:id", api.List(db, session))
 }
 `)
 	mustWriteFile(t, filepath.Join(root, "api", "routes.go"), `package api
@@ -297,13 +298,20 @@ func GetConfig(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func List(db *client.Client) echo.HandlerFunc {
+func List(db *client.Client, session *client.Session) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		records, err := db.Records.Query(c.Param("id")).Where().OrderBy().Do()
 		if err != nil {
 			return err
 		}
-		return c.JSON(200, records)
+		selected, err := session.Selected()
+		if err != nil {
+			return err
+		}
+		if len(records) == 0 {
+			selected = ""
+		}
+		return c.JSON(200, map[string]any{"records": records, "selected": selected})
 	}
 }
 `)
@@ -313,6 +321,12 @@ import "example.com/methodchain/model"
 
 type Client struct {
 	Records RecordActions
+}
+
+type Session struct{}
+
+func (*Session) Selected() (string, error) {
+	return "", nil
 }
 
 type RecordActions struct{}
@@ -386,8 +400,12 @@ type Record struct {
 			t.Fatalf("expected %s to be %s, got %#v", name, typ, properties[name])
 		}
 	}
-	if listSchema.Type != "array" || listSchema.Items == nil || listSchema.Items.Ref != "#/components/schemas/model_Record" {
+	records := listSchema.Properties["records"]
+	if records == nil || records.Type != "array" || records.Items == nil || records.Items.Ref != "#/components/schemas/model_Record" {
 		t.Fatalf("expected staged method chain to return []model.Record, got %#v", listSchema)
+	}
+	if selected := listSchema.Properties["selected"]; selected == nil || selected.Type != "string" {
+		t.Fatalf("expected imported receiver method result to remain string, got %#v", selected)
 	}
 }
 
